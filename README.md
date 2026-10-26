@@ -22,6 +22,9 @@ CarbonCrops/
 │   └── sensor-node/         ESP32 sensor node (measurement + LoRa)
 ├── shared/
 │   └── protocol/            LoRa packet format shared by gateway and sensor node
+├── hardware/
+│   ├── mechanics/           Mechanical design (3D models, enclosures, mounts)
+│   └── electronics/         Electronic design (schematics, PCB, wiring)
 ├── docs/                    Project documentation
 └── README.md
 ```
