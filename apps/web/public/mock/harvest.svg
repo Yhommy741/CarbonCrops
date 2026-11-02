@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240">
+  <!-- Placeholder for mock "harvest day" photos -->
+  <rect width="320" height="240" fill="#e0f2fe"/>
+  <circle cx="60" cy="50" r="22" fill="#fcd34d"/>
+  <rect y="110" width="320" height="130" fill="#ca8a04"/>
+  <g stroke="#a16207" stroke-width="3" stroke-linecap="round" fill="none">
+    <path d="M30 230c0-30 4-50 14-62"/>
+    <path d="M80 230c0-30 4-50 14-62"/>
+    <path d="M130 230c0-30 4-50 14-62"/>
+    <path d="M180 230c0-30 4-50 14-62"/>
+    <path d="M230 230c0-30 4-50 14-62"/>
+    <path d="M280 230c0-30 4-50 14-62"/>
+  </g>
+  <g fill="#fde047">
+    <ellipse cx="46" cy="166" rx="5" ry="9"/>
+    <ellipse cx="96" cy="166" rx="5" ry="9"/>
+    <ellipse cx="146" cy="166" rx="5" ry="9"/>
+    <ellipse cx="196" cy="166" rx="5" ry="9"/>
+    <ellipse cx="246" cy="166" rx="5" ry="9"/>
+    <ellipse cx="296" cy="166" rx="5" ry="9"/>
+  </g>
+  <rect x="8" y="8" width="152" height="24" rx="6" fill="#000" opacity="0.45"/>
+  <text x="16" y="25" font-family="sans-serif" font-size="13" fill="#fff">รูปจำลอง · วันเก็บเกี่ยว</text>
+</svg>

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240">
+  <!-- Placeholder for mock "planting day" photos -->
+  <rect width="320" height="240" fill="#bae6fd"/>
+  <circle cx="260" cy="50" r="22" fill="#fde68a"/>
+  <rect y="120" width="320" height="120" fill="#7c9a92"/>
+  <rect y="120" width="320" height="120" fill="#38bdf8" opacity="0.35"/>
+  <g stroke="#15803d" stroke-width="3" stroke-linecap="round">
+    <path d="M40 200v-18M40 190l-6-8M40 190l6-8"/>
+    <path d="M90 205v-18M90 195l-6-8M90 195l6-8"/>
+    <path d="M140 200v-18M140 190l-6-8M140 190l6-8"/>
+    <path d="M190 205v-18M190 195l-6-8M190 195l6-8"/>
+    <path d="M240 200v-18M240 190l-6-8M240 190l6-8"/>
+    <path d="M65 160v-12M65 154l-4-6M65 154l4-6"/>
+    <path d="M115 162v-12M115 156l-4-6M115 156l4-6"/>
+    <path d="M165 160v-12M165 154l-4-6M165 154l4-6"/>
+    <path d="M215 162v-12M215 156l-4-6M215 156l4-6"/>
+    <path d="M265 160v-12M265 154l-4-6M265 154l4-6"/>
+  </g>
+  <rect x="8" y="8" width="132" height="24" rx="6" fill="#000" opacity="0.45"/>
+  <text x="16" y="25" font-family="sans-serif" font-size="13" fill="#fff">รูปจำลอง · วันปลูก</text>
+</svg>

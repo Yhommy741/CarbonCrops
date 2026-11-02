@@ -1,0 +1,13 @@
+{
+  "name": "CarbonCrops – นาเปียกสลับแห้ง",
+  "short_name": "CarbonCrops",
+  "description": "ติดตามระดับน้ำนาข้าวแบบเปียกสลับแห้ง (AWD) และคาร์บอนเครดิต",
+  "lang": "th",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f2",
+  "theme_color": "#15803d",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

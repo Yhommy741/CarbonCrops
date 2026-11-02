@@ -1,0 +1,57 @@
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: carboncrops
+      MYSQL_USER: ${DB_USER:-carboncrops}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-carboncrops}
+      # Timestamps in the data are Thai local time; NOW()/CURRENT_TIMESTAMP must match
+      TZ: Asia/Bangkok
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./services/database/data:/var/lib/mysql
+      # Run in name order, only the first time (while services/database/data is still empty)
+      - ./services/database/carboncrops_DB.sql:/docker-entrypoint-initdb.d/01_carboncrops.sql:ro
+      - ./services/database/migrations/002_activity_fertilizer.sql:/docker-entrypoint-initdb.d/02_activity_fertilizer.sql:ro
+      - ./services/database/mock/003_mock_data.sql:/docker-entrypoint-initdb.d/03_mock_data.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./services/mosquitto/config:/mosquitto/config:ro
+      - ./services/mosquitto/data:/mosquitto/data
+      - ./services/mosquitto/log:/mosquitto/log
+
+  api:
+    build: ./services/api
+    environment:
+      # datetime.now() / date.today() must be Thai local time, same as the stored data
+      TZ: Asia/Bangkok
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-carboncrops}
+      DB_PASSWORD: ${DB_PASSWORD:-carboncrops}
+      DB_NAME: carboncrops
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      DEV_LOGIN: ${DEV_LOGIN:-true}
+      INGEST_API_KEY: ${INGEST_API_KEY:-dev-ingest-key}
+      CARBON_PRICE_THB: ${CARBON_PRICE_THB:-300}
+      UPLOAD_DIR: /data/uploads
+      CORS_ORIGINS: http://localhost:5173
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./services/api/uploads:/data/uploads
+    depends_on:
+      db:
+        condition: service_healthy
