@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { api, getPosition, useApi } from '../api.js'
+import PlotTimeline from '../components/PlotTimeline.jsx'
 import { Badge, Button, Card, Empty, ErrorBox, Field, inputClass, Loading, PageTitle } from '../components/ui.jsx'
 import { CYCLE_STATUS, fmtDate, fmtDateTime, fmtNum, todayISO } from '../format.js'
 
@@ -104,6 +105,15 @@ export default function PlotDetail() {
             </dd>
           </div>
         </dl>
+        {plot.latitude && (
+          <iframe
+            title={`แผนที่ ${plot.plot_name}`}
+            src={`https://maps.google.com/maps?q=${plot.latitude},${plot.longitude}&t=k&z=17&output=embed`}
+            className="mt-3 h-64 w-full rounded-xl border-0 sm:h-80"
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        )}
       </Card>
 
       <Card>
@@ -172,17 +182,12 @@ export default function PlotDetail() {
       </Card>
 
       <Card>
-        <h2 className="mb-1 font-semibold">ภาพถ่ายดาวเทียม</h2>
-        <p className="mb-3 text-xs text-stone-500">ใช้ยืนยันว่าแปลงมีน้ำขัง/แห้งจริง (เชื่อม Google Earth Engine ภายหลัง)</p>
-        {plot.satellite_images.length === 0 && <Empty>ยังไม่มีภาพ</Empty>}
-        <ul className="space-y-1 text-sm">
-          {plot.satellite_images.map((s) => (
-            <li key={s.image_id} className="flex justify-between">
-              <span>{fmtDate(s.captured_at)} · {s.source}</span>
-              <span className="text-stone-500">เมฆ {s.cloud_cover_pct ?? '-'}%</span>
-            </li>
-          ))}
-        </ul>
+        <h2 className="mb-1 font-semibold">ไทม์ไลน์ภาพถ่ายดาวเทียม</h2>
+        <p className="mb-2 text-xs text-stone-500">
+          🌱 วันเริ่มปลูก · 🛰️ วันที่ดาวเทียมถ่ายภาพแปลงจริง · 🌾 วันเก็บเกี่ยว — ภาพ HLS (Sentinel-2/Landsat) ความละเอียด 30 ม.
+          จาก NASA GIBS · วงสีเหลือง = ตำแหน่งแปลง
+        </p>
+        <PlotTimeline plotId={plotId} />
       </Card>
     </div>
   )

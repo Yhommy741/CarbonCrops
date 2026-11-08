@@ -69,6 +69,14 @@ export function useApi(path) {
   return { ...state, reload }
 }
 
+/** Fetch an image that needs the login token. Returns the Response; read it with res.blob(). */
+export async function apiImage(path) {
+  const token = getToken()
+  const res = await fetch(`/api${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
+  return res
+}
+
 export const fileUrl = (path) => (path ? `/${path}` : null)
 
 /** Current GPS position for geotagged evidence, or null if denied/unavailable. */

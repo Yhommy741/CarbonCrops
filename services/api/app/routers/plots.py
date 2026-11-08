@@ -1,13 +1,18 @@
+import os
 from datetime import date, datetime
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..access import WRITE_ROLES, plot_access_sql, require_plot
 from ..auth import current_user
 from ..db import execute, fetch_all, fetch_one, get_db
+from ..services import satellite
 from ..services.activities import record_activity
+from ..services.water import SENSOR_SQL
 
 # How many crop cycles a plot has finished ("ทำนาไปแล้วกี่รอบ")
 COMPLETED_CYCLES_SQL = """(SELECT COUNT(*) FROM crop_cycles cc
@@ -98,6 +103,81 @@ def get_plot(plot_id: str, user=Depends(current_user), conn=Depends(get_db)):
         id=plot_id,
     )
     return plot
+
+
+# Same-day order on the timeline
+KIND_ORDER = {"planting": 0, "satellite": 1, "harvest": 2}
+
+
+@router.get("/{plot_id}/timeline")
+def plot_timeline(plot_id: str, user=Depends(current_user), conn=Depends(get_db)):
+    """Planting days, harvest days and the days a satellite really photographed the plot.
+
+    The first call for a plot starts a background search for satellite days;
+    `scan` reports its progress (null when finished), so the app polls until then.
+    """
+    plot = require_plot(conn, user, plot_id)
+    cycles = fetch_all(
+        conn,
+        """SELECT cycle_id, cycle_name, rice_variety, start_date, end_date, status
+           FROM crop_cycles WHERE plot_id = :id""",
+        id=plot_id,
+    )
+    photos = {
+        (r["cycle_id"], r["activity_type"]): r["file_path"]
+        for r in fetch_all(
+            conn,
+            """SELECT a.cycle_id, a.activity_type, MIN(e.file_path) AS file_path
+               FROM activities a
+               JOIN crop_cycles c ON c.cycle_id = a.cycle_id
+               JOIN activity_evidence e ON e.activity_id = a.activity_id
+               WHERE c.plot_id = :id AND a.activity_type IN ('planting', 'harvest')
+               GROUP BY a.cycle_id, a.activity_type""",
+            id=plot_id,
+        )
+    }
+
+    events = []
+    for c in cycles:
+        base = {"cycle_id": c["cycle_id"], "cycle_name": c["cycle_name"], "rice_variety": c["rice_variety"]}
+        events.append({**base, "kind": "planting", "date": c["start_date"].isoformat(),
+                       "photo": photos.get((c["cycle_id"], "planting"))})
+        if c["end_date"] and c["status"] in ("harvested", "closed"):
+            events.append({**base, "kind": "harvest", "date": c["end_date"].isoformat(),
+                           "photo": photos.get((c["cycle_id"], "harvest"))})
+
+    scan = None
+    has_location = plot["latitude"] is not None and plot["longitude"] is not None
+    if has_location:
+        lat, lon = float(plot["latitude"]), float(plot["longitude"])
+        windows = satellite.scan_windows(cycles)
+        scan = satellite.ensure_scan(plot_id, lat, lon, windows)
+        events += satellite.found_images(plot_id, lat, lon, windows)
+
+    events.sort(key=lambda e: (e["date"], KIND_ORDER[e["kind"]]))
+
+    # Sensor water level across the whole timeline, drawn under the images
+    water = []
+    if events:
+        water = fetch_all(conn, SENSOR_SQL, plot_id=plot_id, start=events[0]["date"], end=events[-1]["date"])
+        for p in water:
+            p["level"] = float(p["level"])
+    return {"events": events, "water": water, "scan": scan, "has_location": has_location}
+
+
+@router.get("/{plot_id}/satellite/{day}/{layer}")
+def satellite_image(
+    plot_id: str, day: date, layer: Literal["S30", "L30"], user=Depends(current_user), conn=Depends(get_db)
+):
+    """The satellite image of the plot taken on `day` (found by the timeline scan)."""
+    plot = require_plot(conn, user, plot_id)
+    if plot["latitude"] is None or plot["longitude"] is None:
+        raise HTTPException(404, "แปลงนี้ยังไม่มีพิกัด GPS")
+    folder = satellite.plot_dir(plot_id, float(plot["latitude"]), float(plot["longitude"]))
+    path = satellite.image_path(folder, day, layer)
+    if not os.path.exists(path):
+        raise HTTPException(404, "ไม่มีภาพดาวเทียมวันนี้")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.post("/{plot_id}/cycles", status_code=201)
