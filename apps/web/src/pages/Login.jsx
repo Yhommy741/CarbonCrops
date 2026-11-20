@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useApi } from '../api.js'
 import { useAuth } from '../auth.jsx'
-import { Card, ErrorBox, Loading } from '../components/ui.jsx'
-import { ROLE_LABEL } from '../format.js'
+import { Card, ErrorBox, Loading, PreferenceToggles } from '../components/ui.jsx'
+import { usePreferences } from '../preferences.jsx'
 
 // Development login: pick a user from the database. Replace with LINE Login
 // (auth_identities table) before real farmers use the app.
 export default function Login() {
   const { loginAs } = useAuth()
+  const { t } = usePreferences()
   const { data: users, error, loading } = useApi('/auth/demo-users')
   const [busy, setBusy] = useState(null)
   const [loginError, setLoginError] = useState(null)
@@ -25,14 +26,17 @@ export default function Login() {
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 py-10">
+      <div className="mb-2 flex justify-end">
+        <PreferenceToggles />
+      </div>
       <div className="mb-6 text-center">
         <img src="/icon.svg" alt="" className="mx-auto mb-3 h-16 w-16" />
         <h1 className="text-2xl font-semibold text-green-800">CarbonCrops</h1>
-        <p className="text-stone-500">ทำนาเปียกสลับแห้ง ลดโลกร้อน ได้คาร์บอนเครดิต</p>
+        <p className="text-stone-500">{t('login.tagline')}</p>
       </div>
       <Card>
-        <h2 className="mb-1 font-semibold">เข้าสู่ระบบ</h2>
-        <p className="mb-4 text-xs text-stone-500">โหมดทดสอบ: เลือกผู้ใช้จากฐานข้อมูล (ยังไม่ได้เชื่อม LINE Login)</p>
+        <h2 className="mb-1 font-semibold">{t('login.title')}</h2>
+        <p className="mb-4 text-xs text-stone-500">{t('login.devNote')}</p>
         {loading && <Loading />}
         <ErrorBox error={error || loginError} />
         <ul className="space-y-2">
@@ -49,7 +53,7 @@ export default function Login() {
                   <span className="text-xs text-stone-500">{u.province}</span>
                 </span>
                 <span className="text-xs text-stone-500">
-                  {busy === u.user_id ? 'กำลังเข้า…' : ROLE_LABEL[u.role]}
+                  {busy === u.user_id ? t('login.signingIn') : t(`role.${u.role}`)}
                 </span>
               </button>
             </li>

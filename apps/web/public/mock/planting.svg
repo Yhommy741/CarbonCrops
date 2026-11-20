@@ -16,6 +16,6 @@
     <path d="M215 162v-12M215 156l-4-6M215 156l4-6"/>
     <path d="M265 160v-12M265 154l-4-6M265 154l4-6"/>
   </g>
-  <rect x="8" y="8" width="132" height="24" rx="6" fill="#000" opacity="0.45"/>
-  <text x="16" y="25" font-family="sans-serif" font-size="13" fill="#fff">รูปจำลอง · วันปลูก</text>
+  <rect x="8" y="8" width="150" height="24" rx="6" fill="#000" opacity="0.45"/>
+  <text x="16" y="25" font-family="sans-serif" font-size="13" fill="#fff">Mock photo · planting</text>
 </svg>

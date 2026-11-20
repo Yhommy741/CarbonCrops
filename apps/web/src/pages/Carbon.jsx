@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { useApi } from '../api.js'
-import { Badge, Card, Empty, ErrorBox, Field, inputClass, Loading, PageTitle, Stat, VERIFICATION_COLOR } from '../components/ui.jsx'
-import { fmtBaht, fmtDate, fmtNum, VERIFICATION_STATUS } from '../format.js'
+import { Badge, Card, CREDIT_COLOR, Empty, ErrorBox, Field, inputClass, Loading, PageTitle, Stat } from '../components/ui.jsx'
+import { usePreferences } from '../preferences.jsx'
 
 export default function Carbon() {
+  const { t, fmt } = usePreferences()
   const { data, error, loading } = useApi('/carbon/summary')
   const [price, setPrice] = useState(null)
 
@@ -12,26 +13,26 @@ export default function Carbon() {
   if (error) return <ErrorBox error={error} />
 
   const unitPrice = price ?? data.price_thb_per_tco2e
-  const { verified_tco2e, pending_tco2e, estimated_tco2e } = data.totals
+  const { verified_tco2e, pending_tco2e, estimated_tco2e, earned_thb } = data.totals
 
   return (
     <div className="space-y-4">
-      <PageTitle title="คาร์บอนและรายได้" subtitle="ปริมาณก๊าซเรือนกระจกที่ลดได้จากการทำนาเปียกสลับแห้ง" />
+      <PageTitle title={t('carbon.title')} subtitle={t('carbon.subtitle')} />
 
       <Card className="space-y-4">
         <div className="grid grid-cols-3 gap-3">
-          <Stat label="รับรองแล้ว" value={fmtNum(verified_tco2e)} unit="tCO₂e" tone="text-green-700" />
-          <Stat label="รอตรวจสอบ" value={fmtNum(pending_tco2e)} unit="tCO₂e" tone="text-violet-700" />
-          <Stat label="ประเมินเบื้องต้น" value={fmtNum(estimated_tco2e)} unit="tCO₂e" tone="text-stone-600" />
+          <Stat label={t('carbon.verified')} value={fmt.num(verified_tco2e)} unit="tCO₂e" tone="text-green-700" />
+          <Stat label={t('carbon.pending')} value={fmt.num(pending_tco2e)} unit="tCO₂e" tone="text-violet-700" />
+          <Stat label={t('carbon.notSubmitted')} value={fmt.num(estimated_tco2e)} unit="tCO₂e" tone="text-stone-600" />
         </div>
         <div className="rounded-xl bg-green-50 p-4">
-          <p className="text-sm text-green-900">รายได้โดยประมาณจากเครดิตที่รับรองแล้ว</p>
-          <p className="text-3xl font-semibold text-green-800 tabular-nums">{fmtBaht(verified_tco2e * unitPrice)}</p>
+          <p className="text-sm text-green-900">{t('carbon.earned')}</p>
+          <p className="text-3xl font-semibold text-green-800 tabular-nums">{fmt.baht(earned_thb)}</p>
           <p className="text-xs text-green-900/70">
-            ถ้ารวมที่รอตรวจสอบ: {fmtBaht((verified_tco2e + pending_tco2e) * unitPrice)}
+            {t('carbon.projection', { amount: fmt.baht(earned_thb + (pending_tco2e + estimated_tco2e) * unitPrice) })}
           </p>
         </div>
-        <Field label="ราคาอ้างอิง (บาท / tCO₂e)" hint="ราคาจริงขึ้นกับผู้ซื้อและตลาด T-VER ตัวเลขนี้ใช้ประมาณการเท่านั้น">
+        <Field label={t('carbon.price')} hint={t('carbon.priceHint')}>
           <input
             type="number"
             min="0"
@@ -44,34 +45,28 @@ export default function Carbon() {
       </Card>
 
       <Card>
-        <h2 className="mb-2 font-semibold">แยกตามรอบการปลูก</h2>
-        {data.cycles.length === 0 && <Empty>ยังไม่มีรอบการปลูก</Empty>}
+        <h2 className="mb-2 font-semibold">{t('carbon.byCrop')}</h2>
+        {data.calendars.length === 0 && <Empty>{t('carbon.noCrops')}</Empty>}
         <ul className="divide-y divide-stone-100">
-          {data.cycles.map((c) => {
-            const tco2e = c.verified_tco2e ?? c.estimated_tco2e
+          {data.calendars.map((c) => {
+            const tco2e = c.credit_tco2e ?? c.estimated_tco2e
             return (
-              <li key={c.cycle_id}>
-                <Link to={`/cycles/${c.cycle_id}`} className="flex items-center justify-between gap-3 py-3 hover:text-green-800">
+              <li key={c.calendar_id}>
+                <Link to={`/calendars/${c.calendar_id}`} className="flex items-center justify-between gap-3 py-3 hover:text-green-800">
                   <span>
                     <span className="block font-medium">
-                      {c.plot_name} · {c.cycle_name}
+                      {c.paddy_name} · {fmt.season(c)}
                     </span>
                     <span className="text-xs text-stone-500">
-                      {fmtDate(c.start_date)} – {c.end_date ? fmtDate(c.end_date) : 'ปัจจุบัน'}
+                      {fmt.date(c.planting_date)} – {c.harvest_date ? fmt.date(c.harvest_date) : t('common.present')}
                     </span>
                   </span>
                   <span className="text-right">
-                    <span className="block font-semibold tabular-nums">
-                      {tco2e === null ? '–' : `${fmtNum(tco2e)} t`}
-                    </span>
-                    {c.verified_tco2e !== null ? (
-                      <Badge color="green">รับรองแล้ว</Badge>
-                    ) : c.verification_status ? (
-                      <Badge color={VERIFICATION_COLOR[c.verification_status]}>
-                        {VERIFICATION_STATUS[c.verification_status]}
-                      </Badge>
+                    <span className="block font-semibold tabular-nums">{tco2e === null ? '–' : `${fmt.num(tco2e)} t`}</span>
+                    {c.credit_status ? (
+                      <Badge color={CREDIT_COLOR[c.credit_status]}>{t(`creditStatus.${c.credit_status}`)}</Badge>
                     ) : (
-                      <Badge>{c.estimated_tco2e === null ? 'ยังไม่คำนวณ' : 'ประเมิน'}</Badge>
+                      <Badge>{c.status === 'harvested' ? t('carbon.notSubmitted') : t(`calendarStatus.${c.status}`)}</Badge>
                     )}
                   </span>
                 </Link>

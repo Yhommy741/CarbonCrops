@@ -17,7 +17,7 @@ router = APIRouter(prefix="/ingest", tags=["ingest"])
 
 
 class Reading(BaseModel):
-    serial_no: str
+    device_id: str = Field(max_length=20)  # the ID printed on the device, e.g. MOCK-DEV-001
     water_level_cm: float | None = Field(None, ge=-100, le=100)
     battery_pct: int | None = Field(None, ge=0, le=100)
     recorded_at: datetime | None = None
@@ -31,20 +31,20 @@ def _check_key(x_api_key: str = Header(...)):
 @router.post("/readings", status_code=201, dependencies=[Depends(_check_key)])
 def ingest_readings(readings: list[Reading], conn=Depends(get_db)):
     saved, unknown = 0, []
-    for r in readings:
-        device = fetch_one(conn, "SELECT device_id FROM devices WHERE serial_no = :s", s=r.serial_no)
-        if not device:
-            unknown.append(r.serial_no)
+    for r in sorted(readings, key=lambda r: r.recorded_at or datetime.now()):
+        if not fetch_one(conn, "SELECT 1 AS ok FROM devices WHERE device_id = :d", d=r.device_id):
+            unknown.append(r.device_id)
             continue
         # INSERT IGNORE: the gateway may resend the same reading after a lost ACK
         result = execute(
             conn,
-            """INSERT IGNORE INTO sensor_readings (device_id, recorded_at, water_level_cm, battery_pct)
-               VALUES (:device_id, :recorded_at, :level, :battery)""",
-            device_id=device["device_id"],
+            """INSERT IGNORE INTO sensor_readings (device_id, recorded_at, water_level_cm)
+               VALUES (:device_id, :recorded_at, :level)""",
+            device_id=r.device_id,
             recorded_at=r.recorded_at or datetime.now(),
             level=r.water_level_cm,
-            battery=r.battery_pct,
         )
         saved += result.rowcount
+        if r.battery_pct is not None:  # the device row keeps only the latest battery level
+            execute(conn, "UPDATE devices SET battery_pct = :b WHERE device_id = :d", b=r.battery_pct, d=r.device_id)
     return {"saved": saved, "unknown_devices": sorted(set(unknown))}

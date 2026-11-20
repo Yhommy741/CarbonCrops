@@ -1,42 +1,49 @@
-from fastapi import APIRouter, Depends, HTTPException
+"""Certificates: carbon credits a verifier passed (one per crop calendar)."""
 
-from ..access import plot_access_sql
+from fastapi import APIRouter, Depends
+
+from ..access import paddy_access_sql
 from ..auth import current_user
 from ..db import fetch_all, fetch_one, get_db
+from ..errors import api_error
+from ..services.calendar import describe
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 REPORT_SQL = """
-SELECT r.report_id, r.report_no, r.reduction_tco2e, r.generated_at, r.file_path,
-       c.cycle_id, c.cycle_name, c.rice_variety, c.start_date, c.end_date,
-       p.plot_id, p.plot_name, p.area_rai, p.province, p.district, p.subdistrict,
+SELECT cc.credit_id, cc.credit_tco2e, cc.credit_status, cc.amount_thb, cc.submitted_at,
+       cc.verified_at, cc.verify_comment,
+       fc.calendar_id, fc.paddy_id, fc.rice_variety, fc.planting_date, fc.harvest_date,
+       p.paddy_name, p.area_rai, p.province, p.district, p.subdistrict,
        p.latitude, p.longitude, p.land_doc_no,
-       owner.display_name AS farmer_name,
-       e.method_version, e.baseline_tco2e, e.project_tco2e,
-       v.status AS verification_status, v.decided_at, v.comment AS verification_comment,
-       rev.display_name AS verifier_name
-FROM ghg_reports r
-JOIN crop_cycles c ON c.cycle_id = r.cycle_id
-JOIN plots p ON p.plot_id = c.plot_id
+       owner.display_name AS farmer_name, rev.display_name AS verifier_name
+FROM carboncredit_info cc
+JOIN farming_calendars fc ON fc.calendar_id = cc.calendar_id
+JOIN paddy p ON p.paddy_id = cc.paddy_id
 JOIN users owner ON owner.user_id = p.owner_user_id
-JOIN ghg_estimates e ON e.estimate_id = r.estimate_id
-LEFT JOIN verifications v ON v.verification_id = r.verification_id
-LEFT JOIN users rev ON rev.user_id = v.verifier_user_id
+LEFT JOIN users rev ON rev.user_id = cc.verified_by
+WHERE cc.credit_status = 'passed'
 """
+
+
+def _report(row):
+    row = describe(row)
+    # The table has no report number; a short, stable one from the credit id
+    row["report_no"] = "CC-" + row["credit_id"][:8].upper()
+    return row
 
 
 @router.get("")
 def list_reports(user=Depends(current_user), conn=Depends(get_db)):
-    where, params = plot_access_sql(user)
-    return fetch_all(conn, f"{REPORT_SQL} WHERE {where} ORDER BY r.generated_at DESC", **params)
+    where, params = paddy_access_sql(user)
+    rows = fetch_all(conn, f"{REPORT_SQL} AND {where} ORDER BY cc.verified_at DESC", **params)
+    return [_report(r) for r in rows]
 
 
-@router.get("/{report_id}")
-def get_report(report_id: str, user=Depends(current_user), conn=Depends(get_db)):
-    where, params = plot_access_sql(user)
-    report = fetch_one(
-        conn, f"{REPORT_SQL} WHERE r.report_id = :rid AND {where}", rid=report_id, **params
-    )
-    if not report:
-        raise HTTPException(404, "ไม่พบรายงาน")
-    return report
+@router.get("/{credit_id}")
+def get_report(credit_id: str, user=Depends(current_user), conn=Depends(get_db)):
+    where, params = paddy_access_sql(user)
+    row = fetch_one(conn, f"{REPORT_SQL} AND cc.credit_id = :cid AND {where}", cid=credit_id, **params)
+    if not row:
+        raise api_error(404, "report_not_found", "Certificate not found")
+    return _report(row)

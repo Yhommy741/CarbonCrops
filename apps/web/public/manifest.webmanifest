@@ -1,8 +1,8 @@
 {
-  "name": "CarbonCrops – นาเปียกสลับแห้ง",
+  "name": "CarbonCrops – AWD rice farming",
   "short_name": "CarbonCrops",
-  "description": "ติดตามระดับน้ำนาข้าวแบบเปียกสลับแห้ง (AWD) และคาร์บอนเครดิต",
-  "lang": "th",
+  "description": "Track AWD (alternate wetting and drying) rice paddy water levels and carbon credits",
+  "lang": "en",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f6f7f2",

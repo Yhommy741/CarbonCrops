@@ -3,12 +3,12 @@ from uuid import uuid4
 
 from ..db import execute
 from ..uploads import save_photo
+from .calendar import rice_stages, stage_on
 
 
 def record_activity(
     conn,
-    cycle_id,
-    user_id,
+    calendar,
     activity_type,
     activity_date,
     note=None,
@@ -19,16 +19,17 @@ def record_activity(
     fertilizer_formula=None,
     fertilizer_kg_per_rai=None,
 ):
-    """Insert an activity and, if a photo came with it, its geotagged evidence row."""
+    """Insert an activity (its rice stage worked out from the date) and, with a photo, its evidence row."""
+    stage = stage_on(rice_stages(conn), calendar["planting_date"], activity_date)
     activity_id = str(uuid4())
     execute(
         conn,
-        """INSERT INTO activities (activity_id, cycle_id, recorded_by, activity_type, activity_date,
+        """INSERT INTO activities (activity_id, calendar_id, stage_no, activity_type, activity_date,
                                    note, fertilizer_formula, fertilizer_kg_per_rai)
-           VALUES (:id, :cid, :uid, :type, :date, :note, :formula, :kg)""",
+           VALUES (:id, :cal, :stage, :type, :date, :note, :formula, :kg)""",
         id=activity_id,
-        cid=cycle_id,
-        uid=user_id,
+        cal=calendar["calendar_id"],
+        stage=stage["stage_no"],
         type=activity_type,
         date=activity_date,
         note=note or None,

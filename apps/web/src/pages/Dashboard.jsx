@@ -3,7 +3,7 @@ import { useApi } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import WaterChart from '../components/WaterChart.jsx'
 import { Badge, Card, Empty, ErrorBox, Loading, PageTitle, PHASE_COLOR } from '../components/ui.jsx'
-import { fmtDate, fmtDateTime, fmtNum, PHASE_LABEL } from '../format.js'
+import { usePreferences } from '../preferences.jsx'
 
 function levelTone(level) {
   if (level === undefined) return 'text-stone-400'
@@ -12,58 +12,61 @@ function levelTone(level) {
   return 'text-sky-700'
 }
 
-function PlotCard({ plot }) {
-  const { cycle, phase, latest, alerts } = plot
+function PaddyCard({ paddy }) {
+  const { t, fmt } = usePreferences()
+  const { calendar, phase, latest, alerts } = paddy
   return (
     <Card className="space-y-3">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <Link to={`/plots/${plot.plot_id}`} className="font-semibold text-stone-900 hover:text-green-800">
-            {plot.plot_name}
+          <Link to={`/paddies/${paddy.paddy_id}`} className="font-semibold text-stone-900 hover:text-green-800">
+            {paddy.paddy_name}
           </Link>
           <p className="text-xs text-stone-500">
-            {fmtNum(plot.area_rai)} ไร่ · {plot.district}, {plot.province} · ทำนาแล้ว {plot.completed_cycles} รอบ
+            {t('common.rai', { n: fmt.num(paddy.area_rai) })} · {paddy.district}, {paddy.province} ·{' '}
+            {t('dashboard.completed', { n: paddy.completed_calendars })}
           </p>
         </div>
         {phase && (
           <span className="text-right">
-            <Badge color={PHASE_COLOR[phase.phase_type]}>{PHASE_LABEL[phase.phase_type]}</Badge>
-            <span className="block text-xs text-stone-500">{phase.days} วัน</span>
+            <Badge color={PHASE_COLOR[phase.phase_type]}>{t(`phase.${phase.phase_type}`)}</Badge>
+            <span className="block text-xs text-stone-500">{t('common.days', { n: phase.days })}</span>
           </span>
         )}
       </div>
 
-      {cycle ? (
-        <Link to={`/cycles/${cycle.cycle_id}`} className="block rounded-xl bg-stone-50 p-3 hover:bg-stone-100">
+      {calendar ? (
+        <Link to={`/calendars/${calendar.calendar_id}`} className="block rounded-xl bg-stone-50 p-3 hover:bg-stone-100">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <p className="text-xs text-stone-500">ระดับน้ำล่าสุด</p>
+              <p className="text-xs text-stone-500">{t('dashboard.latestLevel')}</p>
               <p className={`text-3xl font-semibold tabular-nums ${levelTone(latest?.level)}`}>
-                {latest ? fmtNum(latest.level, 1) : '–'}
-                <span className="ml-1 text-sm font-normal text-stone-500">ซม.</span>
+                {latest ? fmt.num(latest.level, 1) : '–'}
+                <span className="ml-1 text-sm font-normal text-stone-500">{t('common.cm')}</span>
               </p>
               <p className="text-xs text-stone-500">
-{latest ? `เซ็นเซอร์ · ${fmtDateTime(latest.t)}` : 'ยังไม่มีข้อมูลจากเซ็นเซอร์'}
+                {latest ? t('dashboard.fromSensor', { time: fmt.dateTime(latest.t) }) : t('dashboard.noSensorData')}
               </p>
             </div>
             <div className="text-right text-xs text-stone-500">
-              <p className="font-medium text-stone-700">{cycle.cycle_name}</p>
-              <p>{cycle.rice_variety}</p>
-              <p>เริ่ม {fmtDate(cycle.start_date)}</p>
-              {plot.battery_pct !== null && <p>🔋 {plot.battery_pct}%</p>}
+              <p className="font-medium text-stone-700">{fmt.season(calendar)}</p>
+              <p>{calendar.rice_variety}</p>
+              <p>{t('dashboard.planted', { date: fmt.date(calendar.planting_date) })}</p>
+              <p>{t('dashboard.stage', { stage: fmt.stage(calendar.stage.stage_no) })}</p>
+              {paddy.battery_pct !== null && <p>🔋 {paddy.battery_pct}%</p>}
             </div>
           </div>
-          {plot.sparkline.length > 1 && (
+          {paddy.sparkline.length > 1 && (
             <div className="mt-2">
-              <WaterChart series={plot.sparkline} compact />
+              <WaterChart series={paddy.sparkline} compact />
             </div>
           )}
         </Link>
       ) : (
         <p className="rounded-xl bg-stone-50 p-3 text-sm text-stone-500">
-          ไม่มีรอบที่กำลังปลูก ·{' '}
-          <Link to={`/plots/${plot.plot_id}`} className="text-green-800 underline">
-            เริ่มรอบใหม่
+          {t('dashboard.noCrop')} ·{' '}
+          <Link to={`/paddies/${paddy.paddy_id}`} className="text-green-800 underline">
+            {t('dashboard.startNew')}
           </Link>
         </p>
       )}
@@ -72,11 +75,11 @@ function PlotCard({ plot }) {
         <ul className="space-y-1">
           {alerts.map((a) => (
             <li
-              key={a.code}
+              key={`${a.code}-${a.params.device ?? ''}`}
               className={`rounded-lg px-3 py-2 text-sm ${a.level === 'warn' ? 'bg-amber-50 text-amber-900' : 'bg-stone-100 text-stone-700'}`}
             >
               {a.level === 'warn' ? '⚠️ ' : 'ℹ️ '}
-              {a.message}
+              {t(`alerts.${a.code}`, a.params)}
             </li>
           ))}
         </ul>
@@ -87,30 +90,31 @@ function PlotCard({ plot }) {
 
 export default function Dashboard() {
   const { user } = useAuth()
+  const { t } = usePreferences()
   const { data, error, loading } = useApi('/dashboard')
 
   return (
     <>
       <PageTitle
-        title={user.role === 'farmer' ? `สวัสดี ${user.display_name}` : 'แปลงนาทั้งหมด'}
-        subtitle="ติดตามน้ำในนาแบบเปียกสลับแห้ง"
+        title={user.role === 'farmer' ? t('dashboard.greeting', { name: user.display_name }) : t('dashboard.allPaddies')}
+        subtitle={t('dashboard.subtitle')}
         action={
           user.role !== 'verifier' && (
             <Link
-              to="/plots/new"
+              to="/paddies/new"
               className="rounded-xl bg-green-700 px-4 py-2 text-sm font-medium text-white hover:bg-green-800"
             >
-              + เพิ่มแปลง
+              {t('dashboard.addPaddy')}
             </Link>
           )
         }
       />
       {loading && <Loading />}
       <ErrorBox error={error} />
-      {data && data.plots.length === 0 && <Empty>ยังไม่มีแปลงนา กด “เพิ่มแปลง” เพื่อเริ่มต้น</Empty>}
+      {data && data.paddies.length === 0 && <Empty>{t('dashboard.empty')}</Empty>}
       <div className="space-y-4">
-        {data?.plots.map((p) => (
-          <PlotCard key={p.plot_id} plot={p} />
+        {data?.paddies.map((p) => (
+          <PaddyCard key={p.paddy_id} paddy={p} />
         ))}
       </div>
     </>

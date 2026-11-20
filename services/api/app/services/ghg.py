@@ -130,17 +130,18 @@ def to_tco2e(sf_w, days, area_ha):
     return EF_C * sf_w * SF_P * days * area_ha / 1000 * GWP_CH4
 
 
-def estimate(cycle, area_rai, series, today=None):
+def estimate(planting_date, harvest_date, area_rai, series, today=None):
+    """CH4 reduction for one crop calendar; harvest_date None = still growing (counts up to today)."""
     today = today or date.today()
-    end = cycle["end_date"] or today
-    days = max((end - cycle["start_date"]).days, 0)
+    end = harvest_date or today
+    days = max((end - planting_date).days, 0)
     area_ha = float(area_rai) * RAI_TO_HA
 
-    phases = detect_phases(series, cycle["start_date"], cycle["end_date"], today)
+    phases = detect_phases(series, planting_date, harvest_date, today)
     drying = [p for p in phases if p["phase_type"] == "drying"]
     confirmed = sum(1 for p in drying if p["confirmed"])
     regime = water_regime(confirmed)
-    days_with_data = len({p["t"].date() for p in series if cycle["start_date"] <= p["t"].date() <= end})
+    days_with_data = len({p["t"].date() for p in series if planting_date <= p["t"].date() <= end})
 
     baseline = to_tco2e(SF_W["continuous"], days, area_ha)
     project = to_tco2e(SF_W[regime], days, area_ha)

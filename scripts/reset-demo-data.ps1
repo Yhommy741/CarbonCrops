@@ -3,9 +3,10 @@
   Rebuild the local database with fresh demo data (sensor readings up to now).
 
 .DESCRIPTION
-  1. Regenerates services/database/mock/003_mock_data.sql
+  1. Regenerates services/database/mock/004_extra_mock_data.sql
   2. Stops the containers and DELETES the local MySQL data (services/database/data)
-  3. Starts everything again; MySQL loads carboncrops_DB.sql + migrations + mock data
+  3. Starts everything again; MySQL loads the schema, the team mock data (v4),
+     migrations/002 and the extra mock data (see docker-compose.yml)
 
   Anything you added through the app on this machine is lost.
 
