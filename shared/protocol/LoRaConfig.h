@@ -9,8 +9,8 @@
 //
 // Thailand (NBTC) LoRa band: 920-925 MHz -> channels 70-74.
 // Factory default is channel 18 (868.125 MHz), which is NOT allowed in Thailand.
-constexpr float   E220_BASE_FREQ_MHZ = 850.125f;
-constexpr uint8_t E220_CHANNEL       = 72;   // 922.125 MHz
+#define E220_BASE_FREQ_MHZ  850.125f
+#define E220_CHANNEL        72         // 922.125 MHz
 
 static_assert(E220_CHANNEL >= 70 && E220_CHANNEL <= 74,
               "E220 channel must stay inside the Thai 920-925 MHz band");

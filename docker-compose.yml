@@ -10,14 +10,16 @@ services:
       TZ: Asia/Bangkok
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     ports:
-      - "3306:3306"
+      # 127.0.0.1 only: reachable from this machine (and the other containers), not the internet
+      - "127.0.0.1:3306:3306"
     volumes:
       - ./services/database/data:/var/lib/mysql
       # Run in name order, only the first time (while services/database/data is still empty)
       - ./services/database/carboncrops_DB_last04112569.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
-      - ./services/database/mock/carboncrops_mock_data_v4.sql:/docker-entrypoint-initdb.d/02_mock_data_v4.sql:ro
+      # Clean start: reference stages + 2 accounts (FarmerA, VBB). For the old sample
+      # data, mount mock/carboncrops_mock_data_v4.sql and mock/004_extra_mock_data.sql instead.
+      - ./services/database/seed/01_two_accounts.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
       - ./services/database/migrations/002_fertilizer_and_photo_gps.sql:/docker-entrypoint-initdb.d/03_fertilizer_and_photo_gps.sql:ro
-      - ./services/database/mock/004_extra_mock_data.sql:/docker-entrypoint-initdb.d/04_extra_mock_data.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 5s
@@ -50,9 +52,33 @@ services:
       UPLOAD_DIR: /data/uploads
       CORS_ORIGINS: http://localhost:5173
     ports:
-      - "8000:8000"
+      # 127.0.0.1 only: the web app reaches it through Vite (dev) or Caddy (VPS)
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./services/api/uploads:/data/uploads
     depends_on:
       db:
         condition: service_healthy
+
+  # Gateway -> Mosquitto -> this bridge -> sensor_readings (services/api/app/mqtt_bridge.py)
+  mqtt-bridge:
+    build: ./services/api
+    command: ["python", "-m", "app.mqtt_bridge"]
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Bangkok
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-carboncrops}
+      DB_PASSWORD: ${DB_PASSWORD:-carboncrops}
+      DB_NAME: carboncrops
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      # Set both once Mosquitto has a password file (README: Deploying to a VPS)
+      MQTT_USER: ${MQTT_USER:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started

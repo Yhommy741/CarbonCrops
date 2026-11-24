@@ -7,3 +7,4 @@ pyjwt>=2.8
 python-dotenv>=1.0
 python-multipart>=0.0.9
 pytest>=8
+paho-mqtt>=2.0

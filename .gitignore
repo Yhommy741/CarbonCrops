@@ -36,6 +36,7 @@ secrets.h
 services/database/data/
 services/mosquitto/data/
 services/mosquitto/log/
+services/mosquitto/config/passwd
 services/api/uploads/
 
 # ---- Logs ----
