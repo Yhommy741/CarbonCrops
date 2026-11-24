@@ -2,9 +2,10 @@ import os
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import HTTPException, UploadFile
+from fastapi import UploadFile
 
 from .config import settings
+from .errors import api_error
 
 ALLOWED_TYPES = {
     "image/jpeg": ".jpg",
@@ -23,10 +24,10 @@ def save_photo(file: UploadFile):
     """
     ext = ALLOWED_TYPES.get(file.content_type)
     if not ext:
-        raise HTTPException(400, "รองรับเฉพาะไฟล์รูปภาพ (jpg, png, webp, heic)")
+        raise api_error(400, "invalid_image", "Only image files are accepted (jpg, png, webp, heic)")
     data = file.file.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
-        raise HTTPException(413, "ไฟล์ใหญ่เกิน 10 MB")
+        raise api_error(413, "file_too_large", "The file is larger than 10 MB")
     now = datetime.now()
     rel = f"{now:%Y}/{now:%m}/{uuid4().hex}{ext}"
     path = os.path.join(settings.upload_dir, rel)

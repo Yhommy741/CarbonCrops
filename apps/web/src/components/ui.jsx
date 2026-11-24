@@ -1,3 +1,5 @@
+import { usePreferences } from '../preferences.jsx'
+
 export function Card({ className = '', children }) {
   return (
     <section className={`rounded-2xl border border-stone-200 bg-white p-4 shadow-sm ${className}`}>
@@ -52,7 +54,8 @@ export function Badge({ color = 'stone', children }) {
 }
 
 export const PHASE_COLOR = { flooded: 'sky', reflood: 'sky', drying: 'amber', final_drain: 'stone', no_data: 'red' }
-export const VERIFICATION_COLOR = { pending: 'violet', in_review: 'sky', approved: 'green', rejected: 'red' }
+export const CREDIT_COLOR = { not_checked: 'violet', passed: 'green', failed: 'red' }
+export const CALENDAR_COLOR = { planned: 'stone', active: 'green', harvested: 'amber' }
 
 export function Field({ label, hint, children }) {
   return (
@@ -68,15 +71,41 @@ export const inputClass =
   'w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-base focus:border-green-600 focus:outline-none focus:ring-2 focus:ring-green-600/20'
 
 export function Loading() {
-  return <p className="py-10 text-center text-stone-500">กำลังโหลด…</p>
+  const { t } = usePreferences()
+  return <p className="py-10 text-center text-stone-500">{t('common.loading')}</p>
 }
 
 export function ErrorBox({ error }) {
+  const { t } = usePreferences()
   if (!error) return null
+  // API errors carry a code with a translation; anything else shows its own message
+  const text = error.code ? t(`errors.${error.code}`, error.params, error.message) : error.message || String(error)
   return (
     <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">
-      {error.message || String(error)}
+      {text}
     </p>
+  )
+}
+
+/** TH/EN and light/dark switches, for the header and the sign-in page. */
+export function PreferenceToggles() {
+  const { lang, setLang, theme, setTheme, t } = usePreferences()
+  const btn = 'rounded-lg px-2 py-1 text-xs text-stone-600 hover:bg-stone-100'
+  return (
+    <div className="flex items-center gap-1">
+      <button type="button" className={btn} onClick={() => setLang(lang === 'th' ? 'en' : 'th')} title={t('settings.languageHint')}>
+        {lang === 'th' ? 'EN' : 'TH'}
+      </button>
+      <button
+        type="button"
+        className={btn}
+        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+        title={theme === 'dark' ? t('settings.light') : t('settings.dark')}
+        aria-label={theme === 'dark' ? t('settings.light') : t('settings.dark')}
+      >
+        {theme === 'dark' ? '☀️' : '🌙'}
+      </button>
+    </div>
   )
 }
 

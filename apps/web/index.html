@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="th">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
@@ -13,6 +13,18 @@
       rel="stylesheet"
     />
     <title>CarbonCrops</title>
+    <script>
+      // Apply the saved theme before first paint (same keys as src/preferences.jsx)
+      try {
+        const theme = localStorage.getItem('cc_theme')
+        const dark = theme ? theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches
+        document.documentElement.classList.toggle('dark', dark)
+        const lang = localStorage.getItem('cc_lang')
+        if (lang) document.documentElement.lang = lang
+      } catch {
+        // storage blocked: preferences.jsx falls back to the defaults
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

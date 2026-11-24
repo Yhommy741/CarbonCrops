@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from ..auth import USER_FIELDS, create_token, current_user
 from ..config import settings
 from ..db import fetch_all, fetch_one, get_db
+from ..errors import api_error
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -34,7 +35,7 @@ def dev_login(body: DevLogin, conn=Depends(get_db)):
         id=body.user_id,
     )
     if not user:
-        raise HTTPException(404, "ไม่พบผู้ใช้")
+        raise api_error(404, "user_not_found", "User not found")
     return {"token": create_token(user["user_id"]), "user": user}
 
 

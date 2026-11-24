@@ -19,6 +19,6 @@
     <ellipse cx="246" cy="166" rx="5" ry="9"/>
     <ellipse cx="296" cy="166" rx="5" ry="9"/>
   </g>
-  <rect x="8" y="8" width="152" height="24" rx="6" fill="#000" opacity="0.45"/>
-  <text x="16" y="25" font-family="sans-serif" font-size="13" fill="#fff">รูปจำลอง · วันเก็บเกี่ยว</text>
+  <rect x="8" y="8" width="146" height="24" rx="6" fill="#000" opacity="0.45"/>
+  <text x="16" y="25" font-family="sans-serif" font-size="13" fill="#fff">Mock photo · harvest</text>
 </svg>

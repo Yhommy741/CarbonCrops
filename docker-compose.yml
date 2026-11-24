@@ -14,9 +14,10 @@ services:
     volumes:
       - ./services/database/data:/var/lib/mysql
       # Run in name order, only the first time (while services/database/data is still empty)
-      - ./services/database/carboncrops_DB.sql:/docker-entrypoint-initdb.d/01_carboncrops.sql:ro
-      - ./services/database/migrations/002_activity_fertilizer.sql:/docker-entrypoint-initdb.d/02_activity_fertilizer.sql:ro
-      - ./services/database/mock/003_mock_data.sql:/docker-entrypoint-initdb.d/03_mock_data.sql:ro
+      - ./services/database/carboncrops_DB_last04112569.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./services/database/mock/carboncrops_mock_data_v4.sql:/docker-entrypoint-initdb.d/02_mock_data_v4.sql:ro
+      - ./services/database/migrations/002_fertilizer_and_photo_gps.sql:/docker-entrypoint-initdb.d/03_fertilizer_and_photo_gps.sql:ro
+      - ./services/database/mock/004_extra_mock_data.sql:/docker-entrypoint-initdb.d/04_extra_mock_data.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 5s

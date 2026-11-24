@@ -19,6 +19,10 @@ export function setToken(token) {
   }
 }
 
+function apiError(message, code, params) {
+  return Object.assign(new Error(message), { code, params })
+}
+
 /** Call the FastAPI backend. `body` is sent as JSON, `form` as multipart (photos). */
 export async function api(path, { method = 'GET', body, form } = {}) {
   const headers = {}
@@ -42,8 +46,10 @@ export async function api(path, { method = 'GET', body, form } = {}) {
     } catch {
       // not JSON
     }
-    if (Array.isArray(detail)) detail = detail.map((d) => d.msg).join(', ')
-    throw new Error(detail || `เกิดข้อผิดพลาด (HTTP ${res.status})`)
+    // API errors are {code, message}; <ErrorBox> translates the code (locales: errors.<code>)
+    if (detail?.code) throw apiError(detail.message, detail.code)
+    if (Array.isArray(detail)) throw apiError(detail.map((d) => d.msg).join(', ')) // validation errors
+    throw apiError(detail || `HTTP ${res.status}`, 'http', { status: res.status })
   }
   return res.status === 204 ? null : res.json()
 }

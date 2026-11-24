@@ -1,23 +1,24 @@
 import { NavLink, Outlet } from 'react-router'
 import { useAuth } from '../auth.jsx'
-import { ROLE_LABEL } from '../format.js'
+import { usePreferences } from '../preferences.jsx'
+import { PreferenceToggles } from './ui.jsx'
 
 const FARMER_NAV = [
-  { to: '/', label: 'แปลงนา', icon: '🌾' },
-  { to: '/carbon', label: 'คาร์บอน', icon: '🌱' },
-  { to: '/reports', label: 'รายงาน', icon: '📄' },
-  { to: '/notifications', label: 'แจ้งเตือน', icon: '🔔' },
+  { to: '/', label: 'nav.paddies', icon: '🌾' },
+  { to: '/carbon', label: 'nav.carbon', icon: '🌱' },
+  { to: '/reports', label: 'nav.reports', icon: '📄' },
+  { to: '/notifications', label: 'nav.notifications', icon: '🔔' },
 ]
 
+// Verifiers only review: the request queue, and farmers with their farming history
 const VERIFIER_NAV = [
-  { to: '/verify', label: 'ตรวจสอบ', icon: '✅' },
-  { to: '/', label: 'แปลงนา', icon: '🌾' },
-  { to: '/reports', label: 'รายงาน', icon: '📄' },
-  { to: '/notifications', label: 'แจ้งเตือน', icon: '🔔' },
+  { to: '/verify', label: 'nav.verify', icon: '✅' },
+  { to: '/farmers', label: 'nav.farmers', icon: '👩‍🌾' },
 ]
 
 export default function Layout() {
   const { user, logout } = useAuth()
+  const { t } = usePreferences()
   const nav = user.role === 'farmer' ? FARMER_NAV : VERIFIER_NAV
 
   return (
@@ -26,7 +27,7 @@ export default function Layout() {
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3">
           <NavLink to="/" className="flex items-center gap-2 font-semibold text-green-800">
             <img src="/icon.svg" alt="" className="h-7 w-7" />
-            CarbonCrops
+            <span className="hidden min-[400px]:inline">CarbonCrops</span>
           </NavLink>
           <nav className="hidden gap-1 sm:flex">
             {nav.map((n) => (
@@ -38,17 +39,18 @@ export default function Layout() {
                   `rounded-lg px-3 py-1.5 text-sm ${isActive ? 'bg-green-50 font-medium text-green-800' : 'text-stone-600 hover:bg-stone-100'}`
                 }
               >
-                {n.label}
+                {t(n.label)}
               </NavLink>
             ))}
           </nav>
-          <div className="flex items-center gap-2 text-right text-xs">
-            <div className="leading-tight">
+          <div className="flex items-center gap-1 text-right text-xs">
+            <PreferenceToggles />
+            <div className="ml-1 leading-tight">
               <p className="font-medium text-stone-800">{user.display_name}</p>
-              <p className="text-stone-500">{ROLE_LABEL[user.role]}</p>
+              <p className="text-stone-500">{t(`role.${user.role}`)}</p>
             </div>
             <button type="button" onClick={logout} className="rounded-lg px-2 py-1 text-stone-500 hover:bg-stone-100">
-              ออก
+              {t('nav.logout')}
             </button>
           </div>
         </div>
@@ -58,7 +60,10 @@ export default function Layout() {
         <Outlet />
       </main>
 
-      <nav className="no-print fixed inset-x-0 bottom-0 z-10 grid grid-cols-4 border-t border-stone-200 bg-white sm:hidden">
+      <nav
+        className="no-print fixed inset-x-0 bottom-0 z-10 grid border-t border-stone-200 bg-white sm:hidden"
+        style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}
+      >
         {nav.map((n) => (
           <NavLink
             key={n.to}
@@ -69,7 +74,7 @@ export default function Layout() {
             }
           >
             <span aria-hidden="true" className="text-lg leading-none">{n.icon}</span>
-            {n.label}
+            {t(n.label)}
           </NavLink>
         ))}
       </nav>
