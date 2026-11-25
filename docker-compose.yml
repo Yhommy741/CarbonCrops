@@ -20,6 +20,10 @@ services:
       # data, mount mock/carboncrops_mock_data_v4.sql and mock/004_extra_mock_data.sql instead.
       - ./services/database/seed/01_two_accounts.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
       - ./services/database/migrations/002_fertilizer_and_photo_gps.sql:/docker-entrypoint-initdb.d/03_fertilizer_and_photo_gps.sql:ro
+      - ./services/database/migrations/003_drop_satellite_images.sql:/docker-entrypoint-initdb.d/04_drop_satellite_images.sql:ro
+      - ./services/database/migrations/004_readings_paddy.sql:/docker-entrypoint-initdb.d/05_readings_paddy.sql:ro
+      - ./services/database/migrations/005_planting_activity.sql:/docker-entrypoint-initdb.d/06_planting_activity.sql:ro
+      - ./services/database/migrations/006_harvest_amount.sql:/docker-entrypoint-initdb.d/07_harvest_amount.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 5s
@@ -48,7 +52,6 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       DEV_LOGIN: ${DEV_LOGIN:-true}
       INGEST_API_KEY: ${INGEST_API_KEY:-dev-ingest-key}
-      CARBON_PRICE_THB: ${CARBON_PRICE_THB:-300}
       UPLOAD_DIR: /data/uploads
       CORS_ORIGINS: http://localhost:5173
     ports:

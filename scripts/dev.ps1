@@ -31,11 +31,11 @@ Write-Host '==> Starting backend (MySQL, Mosquitto, FastAPI)...' -ForegroundColo
 if ($Build) { docker compose up -d --build } else { docker compose up -d }
 if ($LASTEXITCODE -ne 0) { Write-Host 'docker compose failed.' -ForegroundColor Red; exit 1 }
 
-Write-Host '==> Waiting for the API on http://localhost:8000 ...' -ForegroundColor Cyan
+Write-Host '==> Waiting for the API on http://127.0.0.1:8000 ...' -ForegroundColor Cyan
 $ready = $false
 for ($i = 0; $i -lt 90; $i++) {
     try {
-        Invoke-WebRequest -Uri 'http://localhost:8000/docs' -UseBasicParsing -TimeoutSec 2 | Out-Null
+        Invoke-WebRequest -Uri 'http://127.0.0.1:8000/docs' -UseBasicParsing -TimeoutSec 2 | Out-Null
         $ready = $true
         break
     } catch {

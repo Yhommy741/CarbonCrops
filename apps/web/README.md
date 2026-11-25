@@ -14,7 +14,7 @@ npm install        # first time, or after package.json changes
 npm run dev        # http://localhost:5173
 ```
 
-During development Vite forwards `/api` and `/uploads` to `http://localhost:8000` (`vite.config.js`).
+During development Vite forwards `/api` and `/uploads` to `http://127.0.0.1:8000` (`vite.config.js`). It uses `127.0.0.1` rather than `localhost` because on Windows `localhost` tries IPv6 first, and the API is published on IPv4 only.
 
 | Command | What it does |
 |---|---|

@@ -120,14 +120,6 @@ INSERT INTO `carboncredit_info` (`credit_id`, `calendar_id`, `paddy_id`, `credit
 ('708d4abc-b6de-514c-a4e0-796563df3aa9', '53d65577-6775-551b-98bf-172976d68256', 'f1287ffd-592b-5db2-bfb4-2253f3bafacf', 2.5, 'failed', NULL, '2026-09-10 09:00:00', '37f50fa5-8e5d-5e89-8f89-9c9e80cc4537', '2026-09-12 10:00:00', 'ข้อมูลสมมติ: หลักฐานไม่ครบ'),
 ('66eae1d0-174f-5438-bfb1-287ec6ec34a3', '3f1aa6ea-c318-5415-992b-81335dfc95f5', 'a5fdde22-0b23-520b-b5a3-12c98e1e40a6', 3.75, 'not_checked', NULL, '2026-09-10 09:00:00', NULL, NULL, NULL);
 
--- satellite_images: 5 rows
-INSERT INTO `satellite_images` (`image_id`, `paddy_id`, `captured_at`, `source`, `file_path`, `cloud_cover_pct`, `ndvi_value`, `ndwi_value`) VALUES
-('661684e3-1699-545c-b908-41caa68cda6f', 'ceed0afb-bfe3-5ca5-921b-c28c9bb7db39', '2026-05-16', 'Sentinel-2', 'mock/satellite/paddy_1.tif', 5, 0.46, -0.05),
-('ac1ac1fc-4f97-5239-b6f5-a5a9a04b6c81', 'f1287ffd-592b-5db2-bfb4-2253f3bafacf', '2026-05-17', 'Sentinel-2', 'mock/satellite/paddy_2.tif', 10, 0.52, 0.0),
-('e58a7fef-6c92-5c62-9ec2-d916b292f1c8', 'a5fdde22-0b23-520b-b5a3-12c98e1e40a6', '2026-05-18', 'Sentinel-2', 'mock/satellite/paddy_3.tif', 15, 0.58, 0.05),
-('42b09349-9db6-5a99-9510-d263850e2972', 'd4c21e1b-3a01-52d9-80ab-5638ec3ea3c6', '2026-10-25', 'Sentinel-2', 'mock/satellite/paddy_4.tif', 20, 0.64, 0.1),
-('6425a986-eeb1-5d52-b69f-b221e613f7c6', 'd22ee80b-eb0c-5daa-a6bb-84416a5a5a67', '2026-10-26', 'Sentinel-2', 'mock/satellite/paddy_5.tif', 25, 0.7, 0.15);
-
 -- notifications: 5 rows
 INSERT INTO `notifications` (`notification_id`, `user_id`, `channel`, `notif_type`, `message`, `status`, `sent_at`, `error_message`) VALUES
 ('f8be3ee8-a7d5-5e45-a3a4-5a3be7c4b30f', '631baedb-ad9b-531e-a4b4-b30ed561748d', 'line', 'water_level_alert', '[MOCK] แปลงนาทดสอบ 1: กรุณาตรวจสอบระดับน้ำ', 'pending', NULL, NULL),

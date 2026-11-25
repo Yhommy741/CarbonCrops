@@ -21,9 +21,6 @@ class Settings:
     # Shared key the LoRa gateway sends when posting sensor readings
     ingest_api_key = os.getenv("INGEST_API_KEY", "dev-ingest-key")
 
-    # Reference price for the income estimator (THB per tCO2e)
-    carbon_price_thb = float(os.getenv("CARBON_PRICE_THB", "300"))
-
     upload_dir = os.getenv("UPLOAD_DIR", "uploads")
     cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
 

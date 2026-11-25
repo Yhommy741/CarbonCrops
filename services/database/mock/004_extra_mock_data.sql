@@ -1642,21 +1642,6 @@ INSERT INTO `activities` (`activity_id`,`calendar_id`,`stage_no`,`activity_type`
 INSERT INTO `activity_evidence` (`evidence_id`,`activity_id`,`file_path`,`file_type`,`captured_at`,`latitude`,`longitude`) VALUES
 ('70000000-0000-4000-8000-000000000101','60000000-0000-4000-8000-000000000101','mock/planting.svg','image/svg+xml','2026-10-18 07:48:00',14.470817,100.111107);
 
--- satellite_images: 12 rows
-INSERT INTO `satellite_images` (`image_id`,`paddy_id`,`captured_at`,`source`,`file_path`,`cloud_cover_pct`,`ndvi_value`,`ndwi_value`) VALUES
-('b0000000-0000-4000-8000-000000000101','ceed0afb-bfe3-5ca5-921b-c28c9bb7db39','2026-05-10','Landsat-9','mock/satellite/L9_m1_20260510.tif',0,0.283,0.139),
-('b0000000-0000-4000-8000-000000000102','ceed0afb-bfe3-5ca5-921b-c28c9bb7db39','2026-05-26','Sentinel-2','mock/satellite/S2_m1_20260526.tif',1,0.385,0.12),
-('b0000000-0000-4000-8000-000000000103','ceed0afb-bfe3-5ca5-921b-c28c9bb7db39','2026-06-05','Landsat-9','mock/satellite/L9_m1_20260605.tif',38,0.516,-0.148),
-('b0000000-0000-4000-8000-000000000104','ceed0afb-bfe3-5ca5-921b-c28c9bb7db39','2026-06-21','Sentinel-2','mock/satellite/S2_m1_20260621.tif',43,0.655,-0.051),
-('b0000000-0000-4000-8000-000000000105','ceed0afb-bfe3-5ca5-921b-c28c9bb7db39','2026-07-06','Sentinel-2','mock/satellite/S2_m1_20260706.tif',64,0.795,0.163),
-('b0000000-0000-4000-8000-000000000106','ceed0afb-bfe3-5ca5-921b-c28c9bb7db39','2026-07-19','Sentinel-2','mock/satellite/S2_m1_20260719.tif',38,0.773,0.129),
-('b0000000-0000-4000-8000-000000000107','ceed0afb-bfe3-5ca5-921b-c28c9bb7db39','2026-08-03','Sentinel-2','mock/satellite/S2_m1_20260803.tif',57,0.813,0.023),
-('b0000000-0000-4000-8000-000000000108','ceed0afb-bfe3-5ca5-921b-c28c9bb7db39','2026-08-16','Sentinel-2','mock/satellite/S2_m1_20260816.tif',68,0.69,0.123),
-('b0000000-0000-4000-8000-000000000109','d4c21e1b-3a01-52d9-80ab-5638ec3ea3c6','2026-10-20','Sentinel-2','mock/satellite/S2_m4_20261020.tif',57,0.23,0.117),
-('b0000000-0000-4000-8000-000000000110','d4c21e1b-3a01-52d9-80ab-5638ec3ea3c6','2026-11-05','Landsat-9','mock/satellite/L9_m4_20261105.tif',0,0.402,0.054),
-('b0000000-0000-4000-8000-000000000111','ceed0afb-bfe3-5ca5-921b-c28c9bb7db39','2026-10-22','Landsat-9','mock/satellite/L9_m1_20261022.tif',52,0.217,0.123),
-('b0000000-0000-4000-8000-000000000112','ceed0afb-bfe3-5ca5-921b-c28c9bb7db39','2026-11-06','Sentinel-2','mock/satellite/S2_m1_20261106.tif',29,0.368,0.153);
-
 -- testing scope: keep only 2 users (generate with --all-users to keep everyone)
 DELETE FROM carboncredit_info WHERE paddy_id IN (SELECT paddy_id FROM paddy WHERE owner_user_id NOT IN ('631baedb-ad9b-531e-a4b4-b30ed561748d', '37f50fa5-8e5d-5e89-8f89-9c9e80cc4537'));
 DELETE FROM sensor_readings WHERE device_id IN (SELECT device_id FROM devices WHERE paddy_id IN (SELECT paddy_id FROM paddy WHERE owner_user_id NOT IN ('631baedb-ad9b-531e-a4b4-b30ed561748d', '37f50fa5-8e5d-5e89-8f89-9c9e80cc4537')));

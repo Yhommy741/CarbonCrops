@@ -35,3 +35,18 @@ def save_photo(file: UploadFile):
     with open(path, "wb") as f:
         f.write(data)
     return f"uploads/{rel}", file.content_type
+
+
+def delete_photos(paths):
+    """Remove uploaded photo files (paths as stored in the DB, "uploads/...").
+    Sample-data paths (e.g. "mock/planting.svg") aren't uploads and are left alone."""
+    root = os.path.realpath(settings.upload_dir)
+    for stored in paths:
+        if not stored.startswith("uploads/"):
+            continue
+        path = os.path.realpath(os.path.join(root, stored.removeprefix("uploads/")))
+        if path.startswith(root + os.sep):
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass

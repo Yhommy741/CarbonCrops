@@ -1,11 +1,11 @@
 // Offline support: the last data each screen loaded stays readable without signal.
-const SHELL = 'cc-shell-v1'
+const SHELL = 'cc-shell-v2'
 const API = 'cc-api'
 const MEDIA = 'cc-media-v1'
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(SHELL).then((c) => c.addAll(['/', '/manifest.webmanifest', '/icon.svg'])),
+    caches.open(SHELL).then((c) => c.addAll(['/', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'])),
   )
   self.skipWaiting()
 })

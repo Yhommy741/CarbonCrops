@@ -4,12 +4,16 @@ Run:  python -m app.mqtt_bridge   (docker compose runs it as the `mqtt-bridge` s
 
 Topic:   carboncrops/gw/<gateway_id>/water
 Payload (one LoRa packet from one sensor node, see firmware/CarbonCrop Gateway):
-    {"gw": "GW-01", "node": 1, "seq": 42, "lat": 13.736717, "lon": 100.523186,
+    {"gw": "GW-01", "node": 1, "seq": 42, "lat": 13.736717, "lon": 100.523186, "tz": 25200,
      "samples": [[1795410000, -61], [1795410001, null], ...]}
     samples = [unix time UTC, water level in mm or null when the sensor had no echo]
+    tz = the farm's local UTC offset in seconds, set on the gateway (LOCAL_UTC_OFFSET_S).
+         Readings are stored in that local time; older gateways without "tz" get UTC+7.
 
 Node N is stored as device_id NODE-000N. Readings are kept only for devices registered
 in the `devices` table (a device must belong to a paddy); others are logged and skipped.
+The packet's lat/lon also sets the GPS position of that device's paddy (farmers don't
+enter it in the app); 0, 0 means "no GPS fix" and is ignored.
 """
 
 import json
@@ -21,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 import paho.mqtt.client as mqtt
 
 from .db import engine
-from .services.readings import LEVEL_MAX_CM, LEVEL_MIN_CM, save_readings
+from .services.readings import LEVEL_MAX_CM, LEVEL_MIN_CM, save_readings, update_paddy_position
 
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
@@ -29,14 +33,24 @@ MQTT_USER = os.getenv("MQTT_USER") or None
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD") or None
 TOPIC = os.getenv("MQTT_TOPIC", "carboncrops/gw/+/water")
 
-# Stored timestamps are Thai local time (see docker-compose.yml); Thailand has no DST
-THAI_TZ = timezone(timedelta(hours=7))
+# Used when a packet has no "tz" (gateway firmware older than the tz field): Thailand, no DST
+DEFAULT_TZ = timezone(timedelta(hours=7))
 
 log = logging.getLogger("mqtt_bridge")
 
 
 def device_id_for(node_id: int) -> str:
     return f"NODE-{node_id:04d}"
+
+
+def packet_tz(offset_s):
+    """The gateway's "tz" (UTC offset in seconds) as a timezone; UTC+7 if missing."""
+    if offset_s is None:
+        return DEFAULT_TZ
+    offset_s = int(offset_s)
+    if not -14 * 3600 <= offset_s <= 14 * 3600:
+        raise ValueError(f"tz out of range: {offset_s}")
+    return timezone(timedelta(seconds=offset_s))
 
 
 def parse_packet(payload: bytes):
@@ -46,16 +60,24 @@ def parse_packet(payload: bytes):
     if not 0 <= node <= 0xFFFF:
         raise ValueError(f"node id out of range: {node}")
     device_id = device_id_for(node)
+    local_tz = packet_tz(msg.get("tz"))
 
     readings = []
     for unix_time, level_mm in msg["samples"]:
-        recorded_at = datetime.fromtimestamp(int(unix_time), THAI_TZ).replace(tzinfo=None)
+        recorded_at = datetime.fromtimestamp(int(unix_time), local_tz).replace(tzinfo=None)
         level_cm = None if level_mm is None else round(level_mm / 10, 1)
         if level_cm is not None and not LEVEL_MIN_CM <= level_cm <= LEVEL_MAX_CM:
             log.warning("%s: level %.1f cm out of range, stored as no reading", device_id, level_cm)
             level_cm = None
         readings.append({"device_id": device_id, "recorded_at": recorded_at, "water_level_cm": level_cm})
     return msg, readings
+
+
+def _float_or_none(value):
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def on_connect(client, userdata, flags, reason_code, properties):
@@ -74,21 +96,27 @@ def on_message(client, userdata, message):
         return
 
     try:
+        device_id = device_id_for(int(msg["node"]))
         with engine.begin() as conn:
             result = save_readings(conn, readings)
+            moved = device_id not in result["unknown_devices"] and update_paddy_position(
+                conn, device_id, _float_or_none(msg.get("lat")), _float_or_none(msg.get("lon"))
+            )
+        if moved:
+            log.info("%s: paddy GPS position set to %s, %s", device_id, msg.get("lat"), msg.get("lon"))
     except Exception:  # DB down etc.: log and keep the bridge alive
         log.exception("could not save packet from node %s", msg.get("node"))
         return
 
     if result["unknown_devices"]:
         log.warning(
-            "%s is not registered in `devices` (link it to a paddy first); %d reading(s) skipped",
+            "%s is not registered in `devices` or not linked to a paddy (add a paddy with it first); %d reading(s) skipped",
             ", ".join(result["unknown_devices"]), len(readings),
         )
     else:
         log.info(
-            "gw=%s node=%s seq=%s rssi=%s: %d/%d new reading(s) saved",
-            msg.get("gw"), msg.get("node"), msg.get("seq"), msg.get("rssi"), result["saved"], len(readings),
+            "gw=%s node=%s seq=%s: %d/%d new reading(s) saved",
+            msg.get("gw"), msg.get("node"), msg.get("seq"), result["saved"], len(readings),
         )
 
 

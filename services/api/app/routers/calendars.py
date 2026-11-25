@@ -1,6 +1,5 @@
 from collections import defaultdict
 from datetime import date, datetime
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
@@ -10,18 +9,20 @@ from ..db import execute, fetch_all, fetch_one, get_db
 from ..errors import api_error
 from ..services import ghg
 from ..services.activities import record_activity
-from ..services.calendar import describe, rice_stages, stage_on
+from ..services.calendar import describe, rice_stages, stage_on, yield_per_rai
+from ..services.credits import create_pending_credit
 from ..services.water import water_series
 
 router = APIRouter(prefix="/calendars", tags=["calendars"])
 
 # What farmers record themselves; everything about water comes from the IoT sensor
-ACTIVITY_TYPES = "^(sowing|transplanting|fertilizing|harvest)$"
-PLANTING_TYPES = ("sowing", "transplanting")
-PHOTO_REQUIRED = (*PLANTING_TYPES, "harvest")
+# Planting is recorded with its photo when the crop is added
+# (POST /paddies/{id}/calendars), so only later records are added here.
+ACTIVITY_TYPES = "^(fertilizing|harvest)$"
+PHOTO_REQUIRED = ("harvest",)
 
 CREDIT_SQL = """
-SELECT cc.credit_id, cc.credit_tco2e, cc.credit_status, cc.amount_thb, cc.submitted_at,
+SELECT cc.credit_id, cc.credit_tco2e, cc.credit_status, cc.submitted_at,
        cc.verified_at, cc.verify_comment, u.display_name AS verifier_name
 FROM carboncredit_info cc LEFT JOIN users u ON u.user_id = cc.verified_by
 WHERE cc.calendar_id = :id
@@ -74,8 +75,10 @@ def get_calendar(calendar_id: str, user=Depends(current_user), conn=Depends(get_
     calendar = describe(require_calendar(conn, user, calendar_id))
     paddy = calendar.pop("paddy")
     calendar["paddy"] = {
-        k: paddy[k] for k in ("paddy_id", "paddy_name", "area_rai", "latitude", "longitude", "province", "district")
+        k: paddy[k]
+        for k in ("paddy_id", "paddy_name", "owner_user_id", "area_rai", "latitude", "longitude", "province", "district")
     }
+    calendar["yield_kg_per_rai"] = yield_per_rai(calendar["harvest_kg"], paddy["area_rai"])
     calendar["paddy"]["owner_name"] = fetch_one(
         conn, "SELECT display_name FROM users WHERE user_id = :id", id=paddy["owner_user_id"]
     )["display_name"]
@@ -85,9 +88,6 @@ def get_calendar(calendar_id: str, user=Depends(current_user), conn=Depends(get_
         calendar["current_stage"] = stage_on(stages, calendar["planting_date"], date.today())
     calendar["activities"] = _activities(conn, calendar_id)
     calendar["fertilizer"] = _fertilizer_summary(calendar["activities"], paddy["area_rai"])
-    calendar["has_planting_photo"] = any(
-        a["activity_type"] in PLANTING_TYPES and a["evidence"] for a in calendar["activities"]
-    )
     series = water_series(conn, calendar)
     calendar["water_series"] = series
     calendar["mrv_preview"] = ghg.estimate(
@@ -106,6 +106,8 @@ def add_activity(
     note: str | None = Form(None),
     fertilizer_formula: str | None = Form(None, max_length=20),
     fertilizer_kg_per_rai: float | None = Form(None, gt=0, le=500),
+    # Harvest: total rice harvested from the paddy (kg); the yield per rai is worked out from it
+    harvest_kg: float | None = Form(None, gt=0, le=1_000_000),
     photo: UploadFile | None = File(None),
     latitude: float | None = Form(None, ge=-90, le=90),
     longitude: float | None = Form(None, ge=-180, le=180),
@@ -122,16 +124,20 @@ def add_activity(
     if activity_date > date.today():
         raise api_error(400, "date_in_future", "The date can't be in the future")
     if activity_type == "harvest":
+        if harvest_kg is None:
+            raise api_error(400, "harvest_kg_required", "Enter how much rice was harvested (kg)")
         if calendar["harvest_date"] is not None:
             raise api_error(409, "already_harvested", "This crop has already been harvested")
         if activity_date < calendar["planting_date"]:
             raise api_error(400, "harvest_before_planting", "Harvest date can't be before the planting date")
         execute(
             conn,
-            "UPDATE farming_calendars SET harvest_date = :d WHERE calendar_id = :id",
+            "UPDATE farming_calendars SET harvest_date = :d, harvest_kg = :kg WHERE calendar_id = :id",
             d=activity_date,
+            kg=round(harvest_kg, 1),
             id=calendar_id,
         )
+        calendar["harvest_date"] = activity_date
 
     activity_id = record_activity(
         conn,
@@ -146,44 +152,6 @@ def add_activity(
         fertilizer_formula=fertilizer_formula if activity_type == "fertilizing" else None,
         fertilizer_kg_per_rai=fertilizer_kg_per_rai if activity_type == "fertilizing" else None,
     )
+    if activity_type == "harvest":  # the crop is finished: its credit goes to the verifier
+        create_pending_credit(conn, calendar, calendar["paddy"]["area_rai"])
     return {"activity_id": activity_id}
-
-
-@router.post("/{calendar_id}/submit", status_code=201)
-def submit_for_verification(calendar_id: str, user=Depends(current_user), conn=Depends(get_db)):
-    """Send the calendar's carbon credit (computed from the sensor data now) to a verifier."""
-    calendar = require_calendar(conn, user, calendar_id, write=True)
-    if calendar["harvest_date"] is None:
-        raise api_error(400, "harvest_first", "Record the harvest before submitting for verification")
-    reduction = mrv(conn, calendar, calendar["paddy"]["area_rai"])["reduction_tco2e"]
-    if reduction <= 0:
-        raise api_error(400, "no_reduction", "The sensor data shows no qualifying drying period, so there is no reduction to claim")
-
-    existing = fetch_one(
-        conn, "SELECT credit_id, credit_status FROM carboncredit_info WHERE calendar_id = :id", id=calendar_id
-    )
-    if existing and existing["credit_status"] != "failed":
-        raise api_error(409, "already_submitted", "This crop has already been submitted")
-    if existing:  # one row per calendar: a failed request is sent again on the same row
-        execute(
-            conn,
-            """UPDATE carboncredit_info
-               SET credit_tco2e = :t, credit_status = 'not_checked', amount_thb = NULL,
-                   submitted_at = NOW(), verified_by = NULL, verified_at = NULL, verify_comment = NULL
-               WHERE credit_id = :id""",
-            t=reduction,
-            id=existing["credit_id"],
-        )
-        return {"credit_id": existing["credit_id"]}
-
-    credit_id = str(uuid4())
-    execute(
-        conn,
-        """INSERT INTO carboncredit_info (credit_id, calendar_id, paddy_id, credit_tco2e)
-           VALUES (:id, :cal, :paddy, :t)""",
-        id=credit_id,
-        cal=calendar_id,
-        paddy=calendar["paddy_id"],
-        t=reduction,
-    )
-    return {"credit_id": credit_id}

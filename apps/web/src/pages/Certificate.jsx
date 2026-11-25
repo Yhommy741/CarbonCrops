@@ -1,3 +1,4 @@
+import { Printer } from 'lucide-react'
 import { Link, useParams } from 'react-router'
 import { useApi } from '../api.js'
 import { Button, ErrorBox, Loading } from '../components/ui.jsx'
@@ -23,17 +24,18 @@ export default function Certificate() {
   return (
     <>
       <div className="no-print mb-4 flex items-center justify-between">
-        <Link to="/reports" className="text-sm text-stone-500 hover:text-green-800">
+        <Link to="/history" className="text-sm text-stone-500 hover:text-green-800">
           {t('certificate.back')}
         </Link>
         <Button variant="secondary" onClick={() => window.print()}>
+          <Printer size={16} aria-hidden="true" />
           {t('certificate.print')}
         </Button>
       </div>
 
       <article className="relative overflow-hidden rounded-2xl border-4 border-double border-green-700 bg-white p-6 sm:p-10">
         <header className="mb-6 text-center">
-          <img src="/icon.svg" alt="" className="mx-auto mb-2 h-12 w-12" />
+          <img src="/icon-512.png" alt="" className="mx-auto mb-2 h-12 w-12" />
           <p className="text-sm tracking-wide text-stone-500">{t('certificate.brand')}</p>
           <h1 className="text-2xl font-semibold text-green-800">{t('certificate.title')}</h1>
           <p className="text-sm text-stone-600">{t('certificate.subtitle')}</p>
@@ -44,7 +46,6 @@ export default function Certificate() {
           <p className="text-sm text-stone-500">{t('certificate.reducedLabel')}</p>
           <p className="text-5xl font-semibold text-green-700 tabular-nums">{fmt.num(r.credit_tco2e)}</p>
           <p className="text-stone-600">{t('certificate.unit')}</p>
-          <p className="mt-1 text-sm text-stone-600">{t('certificate.value', { amount: fmt.baht(r.amount_thb) })}</p>
         </div>
 
         <dl>
@@ -56,8 +57,13 @@ export default function Certificate() {
           <Row label={t('certificate.location')}>{r.latitude ? `${r.latitude}, ${r.longitude}` : '-'}</Row>
           <Row label={t('certificate.deed')}>{r.land_doc_no || '-'}</Row>
           <Row label={t('certificate.crop')}>
-            {fmt.season(r)} · {r.rice_variety} · {fmt.date(r.planting_date)} – {fmt.date(r.harvest_date)}
+            {[fmt.season(r), r.rice_variety, `${fmt.date(r.planting_date)} – ${fmt.date(r.harvest_date)}`].filter(Boolean).join(' · ')}
           </Row>
+          {r.harvest_kg != null && (
+            <Row label={t('certificate.harvest')}>
+              {t('records.harvestSummary', { kg: fmt.num(r.harvest_kg, 0), perRai: fmt.num(r.yield_kg_per_rai, 0) })}
+            </Row>
+          )}
           <Row label={t('certificate.method')}>{t('certificate.methodValue')}</Row>
           <Row label={t('certificate.result')}>
             {t('certificate.resultValue', { name: r.verifier_name ?? '-', date: fmt.date(r.verified_at) })}

@@ -33,19 +33,22 @@ function Request({ c, reload }) {
             {c.paddy_name} · {fmt.season(c)}
           </p>
           <p className="text-xs text-stone-500">
-            {c.farmer_name} · {t('common.rai', { n: fmt.num(c.area_rai) })} · {c.district}, {c.province}
+            {[c.farmer_name, t('common.rai', { n: fmt.num(c.area_rai) }), [c.district, c.province].filter(Boolean).join(', ')]
+              .filter(Boolean)
+              .join(' · ')}
           </p>
           <p className="text-xs text-stone-500">
-            {c.rice_variety} · {fmt.date(c.planting_date)} – {fmt.date(c.harvest_date)} ·{' '}
+            {c.rice_variety && `${c.rice_variety} · `}
+            {fmt.date(c.planting_date)} – {fmt.date(c.harvest_date)} ·{' '}
             {t('verify.submittedOn', { date: fmt.date(c.submitted_at) })}
           </p>
+          {c.harvest_kg != null && <p className="text-xs text-stone-500">{t('records.harvestSummary', { kg: fmt.num(c.harvest_kg, 0), perRai: fmt.num(c.yield_kg_per_rai, 0) })}</p>}
         </div>
         <Badge color={CREDIT_COLOR[c.credit_status]}>{t(`creditStatus.${c.credit_status}`)}</Badge>
       </div>
 
       <p className="text-sm">
         {t('verify.requested')} <strong className="text-green-700">{fmt.num(c.credit_tco2e)} tCO₂e</strong>
-        {c.amount_thb !== null && <span className="text-stone-600"> · {t('verify.value', { amount: fmt.baht(c.amount_thb) })}</span>}
       </p>
       {c.verifier_name && (
         <p className="text-xs text-stone-500">{t('verify.checkedBy', { name: c.verifier_name, time: fmt.dateTime(c.verified_at) })}</p>

@@ -1,3 +1,5 @@
+import { Moon, Sun, X } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 import { usePreferences } from '../preferences.jsx'
 
 export function Card({ className = '', children }) {
@@ -87,10 +89,12 @@ export function ErrorBox({ error }) {
   )
 }
 
-/** TH/EN and light/dark switches, for the header and the sign-in page. */
-export function PreferenceToggles() {
+/** TH/EN and light/dark switches, for the header (`onNav`: on the green bar) and the sign-in page. */
+export function PreferenceToggles({ onNav = false }) {
   const { lang, setLang, theme, setTheme, t } = usePreferences()
-  const btn = 'rounded-lg px-2 py-1 text-xs text-stone-600 hover:bg-stone-100'
+  const btn = `flex items-center rounded-lg px-2 py-1 text-xs ${
+    onNav ? 'text-nav-muted hover:bg-nav-hover hover:text-nav-ink' : 'text-stone-600 hover:bg-stone-100'
+  }`
   return (
     <div className="flex items-center gap-1">
       <button type="button" className={btn} onClick={() => setLang(lang === 'th' ? 'en' : 'th')} title={t('settings.languageHint')}>
@@ -103,7 +107,7 @@ export function PreferenceToggles() {
         title={theme === 'dark' ? t('settings.light') : t('settings.dark')}
         aria-label={theme === 'dark' ? t('settings.light') : t('settings.dark')}
       >
-        {theme === 'dark' ? '☀️' : '🌙'}
+        {theme === 'dark' ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}
       </button>
     </div>
   )
@@ -140,5 +144,50 @@ export function Photo({ src, alt, className = '' }) {
         img.src = '/mock/missing.svg'
       }}
     />
+  )
+}
+
+/**
+ * Popup over the current page (native <dialog>): closes with Esc, the X button
+ * or a tap outside. Children mount only while open, so a form inside starts
+ * empty every time.
+ */
+export function Modal({ open, onClose, title, children }) {
+  const { t } = usePreferences()
+  const ref = useRef(null)
+
+  useEffect(() => {
+    const dialog = ref.current
+    if (!dialog) return
+    if (open && !dialog.open) dialog.showModal()
+    if (!open && dialog.open) dialog.close()
+  }, [open])
+
+  return (
+    <dialog
+      ref={ref}
+      onClose={onClose}
+      // A click on the dialog element itself (not its content) is the backdrop
+      onClick={(e) => e.target === ref.current && onClose()}
+      aria-labelledby="modal-title"
+      className="m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border border-stone-200 bg-white p-0 text-stone-900 shadow-xl backdrop:bg-black/50"
+    >
+      {open && (
+        <div className="p-4">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <h2 id="modal-title" className="text-lg font-semibold">{title}</h2>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={t('common.close')}
+              className="-m-1 rounded-lg p-1 text-stone-500 hover:bg-stone-100"
+            >
+              <X size={20} aria-hidden="true" />
+            </button>
+          </div>
+          {children}
+        </div>
+      )}
+    </dialog>
   )
 }

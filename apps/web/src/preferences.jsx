@@ -80,7 +80,6 @@ export function PreferencesProvider({ children }) {
 
     const fmt = {
       num,
-      baht: (v) => t('common.baht', { n: num(v, 0) }),
       date: (v) =>
         v ? new Date(v).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: '2-digit' }) : '-',
       dateTime: (v) =>

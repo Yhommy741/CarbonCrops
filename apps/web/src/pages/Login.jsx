@@ -30,7 +30,7 @@ export default function Login() {
         <PreferenceToggles />
       </div>
       <div className="mb-6 text-center">
-        <img src="/icon.svg" alt="" className="mx-auto mb-3 h-16 w-16" />
+        <img src="/icon-512.png" alt="" className="mx-auto mb-3 h-16 w-16" />
         <h1 className="text-2xl font-semibold text-green-800">CarbonCrops</h1>
         <p className="text-stone-500">{t('login.tagline')}</p>
       </div>

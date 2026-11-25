@@ -76,15 +76,3 @@ export function useApi(path) {
 }
 
 export const fileUrl = (path) => (path ? `/${path}` : null)
-
-/** Current GPS position for geotagged evidence, or null if denied/unavailable. */
-export function getPosition() {
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) return resolve(null)
-    navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
-    )
-  })
-}

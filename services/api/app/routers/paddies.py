@@ -1,142 +1,109 @@
 from datetime import date, datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
 
-from ..access import paddy_access_sql, require_paddy
+from ..access import require_paddy
 from ..auth import current_user
 from ..db import execute, fetch_all, fetch_one, get_db
 from ..errors import api_error
 from ..services.activities import record_activity
-from ..services.calendar import describe
+from ..uploads import delete_photos
 
 router = APIRouter(prefix="/paddies", tags=["paddies"])
 
-# How many crop calendars a paddy has finished (harvested)
-COMPLETED_SQL = """(SELECT COUNT(*) FROM farming_calendars fc
-    WHERE fc.paddy_id = p.paddy_id AND fc.harvest_date IS NOT NULL)"""
+
+def normalize_device_id(raw: str) -> str:
+    """'1', '0001', 'node-1' or 'NODE-0001' -> 'NODE-0001' (the ID the MQTT bridge stores,
+    see mqtt_bridge.device_id_for). Raises ValueError for anything else."""
+    s = raw.strip().upper().removeprefix("NODE").lstrip("-_ ")
+    if not s.isdigit() or not 0 <= int(s) <= 0xFFFF:
+        raise ValueError("Device ID must look like NODE-0001")
+    return f"NODE-{int(s):04d}"
 
 
-class PaddyIn(BaseModel):
-    paddy_name: str = Field(min_length=1, max_length=100)
-    area_rai: float = Field(gt=0)
-    latitude: float | None = Field(None, ge=-90, le=90)
-    longitude: float | None = Field(None, ge=-180, le=180)
-    province: str | None = None
-    district: str | None = None
-    subdistrict: str | None = None
-    land_doc_no: str | None = None
-
-
-@router.get("")
-def list_paddies(user=Depends(current_user), conn=Depends(get_db)):
-    where, params = paddy_access_sql(user)
-    return fetch_all(
+def start_calendar(conn, paddy_id, planting_date, photo, captured_at):
+    """Insert a crop calendar and its 'planting' activity with the planting-day photo (the
+    farmer's proof the crop began); returns the calendar id. Rice variety and sowing vs
+    transplanting aren't asked: the IPCC Tier 1 CH4 method (services/ghg.py) uses neither."""
+    if planting_date > date.today():
+        raise api_error(400, "date_in_future", "The date can't be in the future")
+    calendar = {"calendar_id": str(uuid4()), "paddy_id": paddy_id, "planting_date": planting_date}
+    execute(
         conn,
-        f"""SELECT p.paddy_id, p.paddy_name, p.area_rai, p.province, p.district,
-                   u.display_name AS owner_name, {COMPLETED_SQL} AS completed_calendars
-            FROM paddy p JOIN users u ON u.user_id = p.owner_user_id
-            WHERE {where} ORDER BY p.paddy_name""",
-        **params,
+        """INSERT INTO farming_calendars (calendar_id, paddy_id, planting_date)
+           VALUES (:calendar_id, :paddy_id, :planting_date)""",
+        **calendar,
     )
+    record_activity(conn, calendar, "planting", planting_date, photo=photo, captured_at=captured_at)
+    return calendar["calendar_id"]
 
 
 @router.post("", status_code=201)
-def create_paddy(body: PaddyIn, user=Depends(current_user), conn=Depends(get_db)):
-    paddy_id = str(uuid4())
-    execute(
-        conn,
-        """INSERT INTO paddy (paddy_id, owner_user_id, paddy_name, latitude, longitude, area_rai,
-                              province, district, subdistrict, land_doc_no)
-           VALUES (:id, :owner, :paddy_name, :latitude, :longitude, :area_rai,
-                   :province, :district, :subdistrict, :land_doc_no)""",
-        id=paddy_id,
-        owner=user["user_id"],
-        **body.model_dump(),
-    )
-    return {"paddy_id": paddy_id}
-
-
-@router.get("/{paddy_id}")
-def get_paddy(paddy_id: str, user=Depends(current_user), conn=Depends(get_db)):
-    paddy = require_paddy(conn, user, paddy_id)
-    paddy["owner_name"] = fetch_one(
-        conn, "SELECT display_name FROM users WHERE user_id = :id", id=paddy["owner_user_id"]
-    )["display_name"]
-    paddy["calendars"] = [
-        describe(c)
-        for c in fetch_all(
-            conn,
-            """SELECT fc.calendar_id, fc.paddy_id, fc.rice_variety, fc.planting_date, fc.harvest_date,
-                      cc.credit_tco2e, cc.credit_status
-               FROM farming_calendars fc
-               LEFT JOIN carboncredit_info cc ON cc.calendar_id = fc.calendar_id
-               WHERE fc.paddy_id = :id ORDER BY fc.planting_date DESC""",
-            id=paddy_id,
-        )
-    ]
-    paddy["completed_calendars"] = sum(c["status"] == "harvested" for c in paddy["calendars"])
-    paddy["devices"] = fetch_all(
-        conn,
-        """SELECT d.device_id, d.battery_pct, d.installed_at,
-                  sr.recorded_at AS last_reading_at, sr.water_level_cm AS last_level_cm
-           FROM devices d
-           LEFT JOIN sensor_readings sr ON sr.reading_id = (
-               SELECT s2.reading_id FROM sensor_readings s2
-               WHERE s2.device_id = d.device_id ORDER BY s2.recorded_at DESC LIMIT 1)
-           WHERE d.paddy_id = :id ORDER BY d.device_id""",
-        id=paddy_id,
-    )
-    paddy["satellite_images"] = fetch_all(
-        conn,
-        """SELECT image_id, captured_at, source, cloud_cover_pct, ndvi_value, ndwi_value
-           FROM satellite_images WHERE paddy_id = :id ORDER BY captured_at DESC""",
-        id=paddy_id,
-    )
-    return paddy
-
-
-@router.post("/{paddy_id}/calendars", status_code=201)
-def create_calendar(
-    paddy_id: str,
-    rice_variety: str | None = Form(None, max_length=60),
+def create_paddy(
+    paddy_name: str = Form(..., min_length=1, max_length=100),
+    area_rai: float = Form(..., gt=0),
+    # The sensor node installed in this paddy: its readings (and GPS position) go to this paddy
+    device_id: str = Form(..., min_length=1, max_length=20),
     planting_date: date = Form(...),
-    planting_method: str = Form("sowing", pattern="^(sowing|transplanting)$"),
     photo: UploadFile = File(...),
-    latitude: float | None = Form(None, ge=-90, le=90),
-    longitude: float | None = Form(None, ge=-180, le=180),
     captured_at: datetime | None = Form(None),
     user=Depends(current_user),
     conn=Depends(get_db),
 ):
-    """Start a crop calendar: the planting-day photo is the farmer's proof it began."""
-    require_paddy(conn, user, paddy_id, write=True)
-    if planting_date > date.today():
-        raise api_error(400, "date_in_future", "The date can't be in the future")
-    growing = fetch_one(
+    """Add a paddy and start farming it: the paddy, its sensor and its first crop (with the
+    planting-day photo) are saved together, or nothing is saved."""
+    try:
+        device_id = normalize_device_id(device_id)
+    except ValueError:
+        raise api_error(400, "device_id_invalid", "Device ID must look like NODE-0001")
+    # A sensor is reused season after season: it can move here unless its paddy is still growing
+    device = fetch_one(conn, "SELECT device_id, paddy_id FROM devices WHERE device_id = :d", d=device_id)
+    if device and device["paddy_id"] and fetch_one(
         conn,
-        "SELECT planting_date FROM farming_calendars WHERE paddy_id = :id AND harvest_date IS NULL",
-        id=paddy_id,
-    )
-    if growing:
-        raise api_error(409, "calendar_growing", "This paddy still has a crop that hasn't been harvested")
-    calendar = {"calendar_id": str(uuid4()), "paddy_id": paddy_id, "planting_date": planting_date}
+        "SELECT 1 AS ok FROM farming_calendars WHERE paddy_id = :p AND harvest_date IS NULL",
+        p=device["paddy_id"],
+    ):
+        raise api_error(409, "device_taken", "This sensor is in a paddy that hasn't been harvested yet")
+    paddy_id = str(uuid4())
     execute(
         conn,
-        """INSERT INTO farming_calendars (calendar_id, paddy_id, rice_variety, planting_date)
-           VALUES (:calendar_id, :paddy_id, :variety, :planting_date)""",
-        variety=rice_variety or None,
-        **calendar,
+        """INSERT INTO paddy (paddy_id, owner_user_id, paddy_name, area_rai)
+           VALUES (:id, :owner, :name, :area)""",
+        id=paddy_id,
+        owner=user["user_id"],
+        name=paddy_name.strip(),
+        area=area_rai,
     )
-    record_activity(
+    # Old readings keep their paddy (sensor_readings.paddy_id); new ones come here
+    execute(
         conn,
-        calendar,
-        planting_method,
-        planting_date,
-        photo=photo,
-        latitude=latitude,
-        longitude=longitude,
-        captured_at=captured_at,
+        """INSERT INTO devices (device_id, paddy_id, installed_at) VALUES (:d, :p, CURDATE())
+           ON DUPLICATE KEY UPDATE paddy_id = :p, installed_at = CURDATE(), battery_pct = NULL""",
+        d=device_id,
+        p=paddy_id,
     )
-    return {"calendar_id": calendar["calendar_id"]}
+    calendar_id = start_calendar(conn, paddy_id, planting_date, photo, captured_at)
+    return {"paddy_id": paddy_id, "device_id": device_id, "calendar_id": calendar_id}
+
+
+@router.delete("/{paddy_id}", status_code=204)
+def delete_paddy(paddy_id: str, background: BackgroundTasks, user=Depends(current_user), conn=Depends(get_db)):
+    """Delete a paddy and everything about it: crops, records, photos, readings and carbon
+    credits. Its sensor stays registered but unlinked, so it can go into a new paddy."""
+    require_paddy(conn, user, paddy_id, write=True)
+    photos = fetch_all(
+        conn,
+        """SELECT e.file_path FROM activity_evidence e
+           JOIN activities a ON a.activity_id = e.activity_id
+           JOIN farming_calendars fc ON fc.calendar_id = a.calendar_id
+           WHERE fc.paddy_id = :id""",
+        id=paddy_id,
+    )
+    # Credits reference the crops without ON DELETE CASCADE; everything else cascades
+    # from the paddy (crops -> activities -> evidence, readings) or is unlinked (devices)
+    execute(conn, "DELETE FROM carboncredit_info WHERE paddy_id = :id", id=paddy_id)
+    execute(conn, "DELETE FROM paddy WHERE paddy_id = :id", id=paddy_id)
+    # Photo files go after the response; if the commit failed (rare) the rows stay and
+    # those photos show the "missing" placeholder
+    background.add_task(delete_photos, [p["file_path"] for p in photos])

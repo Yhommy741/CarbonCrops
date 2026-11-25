@@ -6,10 +6,12 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    // FastAPI runs on :8000 (docker compose up, or uvicorn in services/api)
+    // FastAPI runs on :8000 (docker compose up, or uvicorn in services/api).
+    // 127.0.0.1, not localhost: on Windows localhost tries IPv6 (::1) first,
+    // and docker-compose.yml publishes the API on IPv4 127.0.0.1 only.
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/uploads': 'http://localhost:8000',
+      '/api': 'http://127.0.0.1:8000',
+      '/uploads': 'http://127.0.0.1:8000',
     },
   },
 })

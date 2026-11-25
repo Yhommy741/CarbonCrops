@@ -14,6 +14,11 @@
 // Unique per gateway; part of the topic and the MQTT client id
 #define GATEWAY_ID "GW-01"
 
+// The farm's local time zone, seconds east of UTC (Thailand = UTC+7). Used for the
+// serial printout and sent as "tz" in every MQTT message, so the server stores
+// readings in the farm's local time.
+#define LOCAL_UTC_OFFSET_S  (7 * 3600)
+
 // One JSON message per LoRa packet (read by services/api/app/mqtt_bridge.py)
 #define MQTT_TOPIC_WATER  "carboncrops/gw/" GATEWAY_ID "/water"
 // Retained "online" / "offline" (last will) so you can see if the gateway is up

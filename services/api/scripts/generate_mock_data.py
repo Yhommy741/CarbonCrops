@@ -8,7 +8,6 @@ Loads after the team's carboncrops_mock_data_v4.sql (and migrations/002) and add
   - 3 more farmers with 2-3 paddies each, a device per paddy and 2-3 seasons of history
   - farmer records: sowing/transplanting photo, fertilizer (formula + kg/rai),
     harvest photo, with GPS; rice stage worked out from the date
-  - satellite images (NDVI from crop age, NDWI from the water level that day)
   - carbon credits computed with the real model (passed / failed / not_checked)
 
 Readings run up to the moment the script is run (or --now YYYY-MM-DD), so regenerate
@@ -30,7 +29,6 @@ from app.services import ghg  # noqa: E402
 OUT = API_DIR.parent / "database" / "mock" / "004_extra_mock_data.sql"
 READING_EVERY_H = 4
 SENSOR_FLOOR_CM = -30.0  # bottom of the sensor tube
-CARBON_PRICE_THB = 300  # same default as the API
 
 _args = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 _args.add_argument("--now", type=date.fromisoformat, help="end of the data (default: now)")
@@ -242,7 +240,6 @@ def gap_window(c):
 
 readings = []  # (device_id, recorded_at, level)
 series = defaultdict(list)  # paddy key -> [{"t", "level"}] for the carbon estimates
-daily_level = {}  # (paddy key, date) -> level, for NDWI
 for key, (device_id, installed, existing) in DEVICES.items():
     timeline, gaps = {}, []
     for c in [c for c in CALENDARS if c["paddy"] == key]:
@@ -254,7 +251,6 @@ for key, (device_id, installed, existing) in DEVICES.items():
         d = t.date()
         if d not in timeline:
             timeline[d] = fallow_level(d)
-        daily_level[key, d] = timeline[d]
         skip = any(g0 <= d <= g1 for g0, g1 in gaps) or (existing and d == V4_READING_DAY)
         if not skip:
             nxt = timeline.get(d + timedelta(days=1), timeline[d])
@@ -264,9 +260,9 @@ for key, (device_id, installed, existing) in DEVICES.items():
             series[key].append({"t": t, "level": level})
         t += timedelta(hours=READING_EVERY_H)
 
-# ---------------------------------------------------------------- calendars, farmer records, satellite
+# ---------------------------------------------------------------- calendars, farmer records
 
-calendars_sql, activities, evidence, satellite = [], [], [], []
+calendars_sql, activities, evidence = [], [], []
 FERTILIZER = [  # (day range, formula, kg/rai range, note)
     ((15, 22), "16-20-0", (20, 30), "Basal fertilizer"),
     ((40, 50), "46-0-0", (8, 15), "Top dressing"),
@@ -301,21 +297,6 @@ for c in CALENDARS:
         add_activity(c, "harvest", c["harvest"], f"Combine harvest, yield {rng.randrange(600, 950, 10)} kg/rai",
                      photo="mock/harvest.svg")
 
-for c in CALENDARS:
-    pid = PADDIES[c["paddy"]][0]
-    d = c["planting"] + timedelta(days=rng.randint(3, 10))
-    while d <= (c["harvest"] or TODAY):
-        age = (d - c["planting"]).days
-        ndvi = 0.18 + 0.62 * min(age / 70, 1) - (0.3 * max(age - 95, 0) / 30)  # green-up, then ripening
-        water = daily_level.get((c["paddy"], d), 0)
-        ndwi = max(min(0.05 + water * 0.015, 0.35), -0.35)  # wet field -> positive, dry -> negative
-        source = "Sentinel-2" if rng.random() < 0.8 else "Landsat-9"
-        code = "S2" if source == "Sentinel-2" else "L9"
-        satellite.append((new_id("b"), pid, d, source, f"mock/satellite/{code}_{c['paddy']}_{d:%Y%m%d}.tif",
-                          rng.randint(30, 90) if is_rainy(d) else rng.randint(0, 30),
-                          round(ndvi + rng.uniform(-0.04, 0.04), 3), round(ndwi + rng.uniform(-0.03, 0.03), 3)))
-        d += timedelta(days=rng.randint(10, 16))
-
 # ---------------------------------------------------------------- carbon credits, notifications
 
 credits, notifications = [], []
@@ -347,7 +328,7 @@ for c in CALENDARS:
                    if gap else rng.choice(REJECT_REASONS))
     decided = status != "not_checked"
     credits.append((new_id("c"), c["id"], pid, tco2e, status,
-                    round(tco2e * CARBON_PRICE_THB, 2) if status == "passed" else None,
+                    None,  # amount_thb: no carbon market in this prototype
                     submitted, VERIFIER if decided else None, verified if decided else None, comment))
     if decided:
         result = "verified. Your certificate is ready." if status == "passed" else f"not verified. Reason: {comment}"
@@ -406,16 +387,14 @@ with open(OUT, "w", encoding="utf-8", newline="\n") as f:
                              "fertilizer_formula", "fertilizer_kg_per_rai"], activities)
     insert(f, "activity_evidence", ["evidence_id", "activity_id", "file_path", "file_type", "captured_at",
                                     "latitude", "longitude"], evidence)
-    insert(f, "satellite_images", ["image_id", "paddy_id", "captured_at", "source", "file_path", "cloud_cover_pct",
-                                   "ndvi_value", "ndwi_value"], satellite)
     insert(f, "carboncredit_info", ["credit_id", "calendar_id", "paddy_id", "credit_tco2e", "credit_status",
                                     "amount_thb", "submitted_at", "verified_by", "verified_at", "verify_comment"],
            credits)
     insert(f, "notifications", ["notification_id", "user_id", "notif_type", "message", "status", "sent_at",
                                 "created_at"], notifications)
     if TEST_USERS:
-        # Remove every other user and their data (calendars, activities, evidence and
-        # satellite images go with the paddy via ON DELETE CASCADE)
+        # Remove every other user and their data (calendars, activities and evidence
+        # go with the paddy via ON DELETE CASCADE)
         keep = ", ".join(sql_value(u) for u in TEST_USERS)
         others = f"SELECT paddy_id FROM paddy WHERE owner_user_id NOT IN ({keep})"
         f.write(f"""
@@ -431,4 +410,4 @@ DELETE FROM users WHERE user_id NOT IN ({keep});
 print(f"wrote {OUT.relative_to(API_DIR.parent.parent)} (readings until {NOW:%Y-%m-%d %H:%M})")
 print(f"  farmers +{len(users_sql)}, paddies +{len(paddies_sql)}, calendars +{len(calendars_sql)} "
       f"(sensor data for {len(CALENDARS)}), readings {len(readings)}, activities {len(activities)}, "
-      f"satellite {len(satellite)}, credits {len(credits)}, notifications {len(notifications)}")
+      f"credits {len(credits)}, notifications {len(notifications)}")

@@ -1,6 +1,9 @@
+import { FileText, MapPin, Sprout, Wheat } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useParams } from 'react-router'
-import { api, fileUrl, getPosition, useApi } from '../api.js'
+import { fileUrl, useApi } from '../api.js'
+import { useAuth } from '../auth.jsx'
+import { FertilizerForm, HarvestForm } from '../components/CropRecordForms.jsx'
 import WaterChart from '../components/WaterChart.jsx'
 import {
   Badge,
@@ -9,48 +12,13 @@ import {
   CREDIT_COLOR,
   Empty,
   ErrorBox,
-  Field,
-  inputClass,
   Loading,
   PageTitle,
   PHASE_COLOR,
   Photo,
   Stat,
 } from '../components/ui.jsx'
-import { FERTILIZER_FORMULAS, todayISO } from '../format.js'
 import { usePreferences } from '../preferences.jsx'
-
-/** Runs an async action with busy/error state, then reloads the page data. */
-function useAction(onDone) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState(null)
-  async function run(fn) {
-    setBusy(true)
-    setError(null)
-    try {
-      await fn()
-      onDone()
-      return true
-    } catch (err) {
-      setError(err)
-      return false
-    } finally {
-      setBusy(false)
-    }
-  }
-  return { busy, error, run }
-}
-
-/** Adds the photo and the phone's GPS position (proof it was taken in the field). */
-async function appendGeotaggedPhoto(form, photo) {
-  form.append('photo', photo)
-  form.append('captured_at', new Date().toISOString().slice(0, 19))
-  const pos = await getPosition()
-  if (pos) {
-    form.append('latitude', pos.latitude.toFixed(6))
-    form.append('longitude', pos.longitude.toFixed(6))
-  }
-}
 
 function PhaseRow({ phase }) {
   const { t, fmt } = usePreferences()
@@ -108,106 +76,6 @@ function WaterTab({ calendar }) {
 
 // ---------- farmer records ----------
 
-function FertilizerForm({ calendar, reload }) {
-  const { t, fmt } = usePreferences()
-  const { busy, error, run } = useAction(reload)
-  const [form, setForm] = useState({ formula: FERTILIZER_FORMULAS[0], kg: '', date: todayISO() })
-  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value })
-  const totalKg = form.kg ? Number(form.kg) * Number(calendar.paddy.area_rai) : null
-
-  async function submit(e) {
-    e.preventDefault()
-    const body = new FormData()
-    body.append('activity_type', 'fertilizing')
-    body.append('activity_date', form.date)
-    body.append('fertilizer_formula', form.formula)
-    body.append('fertilizer_kg_per_rai', form.kg)
-    if (await run(() => api(`/calendars/${calendar.calendar_id}/activities`, { method: 'POST', form: body }))) {
-      setForm({ ...form, kg: '' })
-    }
-  }
-
-  return (
-    <form onSubmit={submit} className="space-y-3">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <Field label={t('records.formula')}>
-          <select value={form.formula} onChange={set('formula')} className={inputClass}>
-            {FERTILIZER_FORMULAS.map((f) => (
-              <option key={f}>{f}</option>
-            ))}
-          </select>
-        </Field>
-        <Field
-          label={t('records.amount')}
-          hint={totalKg ? t('records.amountTotal', { kg: fmt.num(totalKg, 0), rai: fmt.num(calendar.paddy.area_rai) }) : null}
-        >
-          <input required type="number" min="0.5" max="500" step="0.5" inputMode="decimal" value={form.kg} onChange={set('kg')} className={inputClass} />
-        </Field>
-        <Field label={t('records.date')}>
-          <input required type="date" min={calendar.planting_date} max={todayISO()} value={form.date} onChange={set('date')} className={inputClass} />
-        </Field>
-      </div>
-      <ErrorBox error={error} />
-      <Button type="submit" disabled={busy}>
-        {busy ? t('common.saving') : t('records.saveFertilizer')}
-      </Button>
-    </form>
-  )
-}
-
-/** Planting or harvest: a geotagged photo of the field on that day. */
-function PhotoForm({ calendar, kind, reload }) {
-  const { t, fmt } = usePreferences()
-  const { busy, error, run } = useAction(reload)
-  const isHarvest = kind === 'harvest'
-  const [date, setDate] = useState(isHarvest ? todayISO() : calendar.planting_date)
-  const [method, setMethod] = useState('sowing')
-  const [photo, setPhoto] = useState(null)
-  const [note, setNote] = useState('')
-
-  async function submit(e) {
-    e.preventDefault()
-    const form = new FormData()
-    form.append('activity_type', isHarvest ? 'harvest' : method)
-    form.append('activity_date', date)
-    if (note) form.append('note', note)
-    await appendGeotaggedPhoto(form, photo)
-    await run(() => api(`/calendars/${calendar.calendar_id}/activities`, { method: 'POST', form }))
-  }
-
-  return (
-    <form onSubmit={submit} className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-2">
-        {isHarvest ? (
-          <Field label={t('records.harvestDate')}>
-            <input required type="date" min={calendar.planting_date} max={todayISO()} value={date} onChange={(e) => setDate(e.target.value)} className={inputClass} />
-          </Field>
-        ) : (
-          <Field label={t('records.method')} hint={t('records.methodHint', { date: fmt.date(calendar.planting_date) })}>
-            <select value={method} onChange={(e) => setMethod(e.target.value)} className={inputClass}>
-              <option value="sowing">{t('activity.sowing')}</option>
-              <option value="transplanting">{t('activity.transplanting')}</option>
-            </select>
-          </Field>
-        )}
-        <Field label={t('records.photo')} hint={t('records.photoHint')}>
-          <input required type="file" accept="image/*" capture="environment" onChange={(e) => setPhoto(e.target.files[0] ?? null)} className="block w-full text-sm" />
-        </Field>
-      </div>
-      {isHarvest && (
-        <Field label={t('records.yield')}>
-          <input value={note} onChange={(e) => setNote(e.target.value)} className={inputClass} placeholder={t('records.yieldPlaceholder')} />
-        </Field>
-      )}
-      <ErrorBox error={error} />
-      <Button type="submit" disabled={busy || !photo}>
-        {busy ? t('common.saving') : isHarvest ? t('records.saveHarvest') : t('records.savePlanting')}
-      </Button>
-      {isHarvest && <p className="text-xs text-stone-500">{t('records.harvestNote')}</p>}
-    </form>
-  )
-}
-
 function ActivityItem({ a }) {
   const { t, fmt } = usePreferences()
   const label = t(`activity.${a.activity_type}`)
@@ -231,9 +99,12 @@ function ActivityItem({ a }) {
           {a.evidence.map((ev) => (
             <a key={ev.evidence_id} href={fileUrl(ev.file_path)} target="_blank" rel="noreferrer" className="text-xs">
               <Photo src={fileUrl(ev.file_path)} alt={label} className="h-24 w-32" />
-              <span className="block text-stone-500">
-                {ev.latitude ? `📍 ${fmt.num(ev.latitude, 4)}, ${fmt.num(ev.longitude, 4)}` : t('common.noLocation')}
-              </span>
+              {ev.latitude && (
+                <span className="flex items-center gap-1 text-stone-500">
+                  <MapPin size={12} aria-hidden="true" />
+                  {fmt.num(ev.latitude, 4)}, {fmt.num(ev.longitude, 4)}
+                </span>
+              )}
             </a>
           ))}
         </div>
@@ -247,9 +118,8 @@ function RecordsTab({ calendar, reload }) {
   const [form, setForm] = useState(null)
   const active = calendar.status === 'active'
   const actions = [
-    !calendar.has_planting_photo && { id: 'planting', label: t('records.plantingPhoto') },
-    active && { id: 'fertilizing', label: t('records.fertilizer') },
-    active && { id: 'harvest', label: t('records.harvest') },
+    active && { id: 'fertilizing', label: t('records.fertilizer'), icon: Sprout },
+    active && { id: 'harvest', label: t('records.harvest'), icon: Wheat },
   ].filter(Boolean)
 
   return (
@@ -261,12 +131,13 @@ function RecordsTab({ calendar, reload }) {
           <div className="mb-3 flex flex-wrap gap-2">
             {actions.map((a) => (
               <Button key={a.id} variant={form === a.id ? 'primary' : 'secondary'} onClick={() => setForm(form === a.id ? null : a.id)}>
+                <a.icon size={16} aria-hidden="true" />
                 {a.label}
               </Button>
             ))}
           </div>
           {form === 'fertilizing' && <FertilizerForm calendar={calendar} reload={reload} />}
-          {(form === 'planting' || form === 'harvest') && <PhotoForm key={form} calendar={calendar} kind={form} reload={reload} />}
+          {form === 'harvest' && <HarvestForm calendar={calendar} reload={reload} />}
         </Card>
       )}
 
@@ -301,13 +172,11 @@ function RecordsTab({ calendar, reload }) {
 
 // ---------- carbon / MRV ----------
 
-function MrvTab({ calendar, reload }) {
+function MrvTab({ calendar }) {
   const { t, fmt } = usePreferences()
-  const { busy, error, run } = useAction(reload)
   const mrv = calendar.mrv_preview
-  const credit = calendar.credit
+  const credit = calendar.credit // created as Pending when the harvest is recorded
   const harvested = calendar.status === 'harvested'
-  const canSubmit = harvested && (!credit || credit.credit_status === 'failed') && mrv.reduction_tco2e > 0
   const gaps = mrv.phases.filter((p) => p.phase_type === 'no_data')
 
   return (
@@ -324,8 +193,8 @@ function MrvTab({ calendar, reload }) {
           </p>
           {credit.credit_status === 'passed' && (
             <p className="text-sm">
-              {t('mrv.value')} <strong>{fmt.baht(credit.amount_thb)}</strong> ·{' '}
-              <Link to={`/reports/${credit.credit_id}`} className="text-green-800 underline">
+              <Link to={`/history/${credit.credit_id}`} className="inline-flex items-center gap-1 text-green-800 underline">
+                <FileText size={14} aria-hidden="true" />
                 {t('mrv.viewCertificate')}
               </Link>
             </p>
@@ -389,19 +258,7 @@ function MrvTab({ calendar, reload }) {
           )}
         </div>
 
-        {calendar.can_edit && (
-          <>
-            <Button
-              disabled={busy || !canSubmit}
-              onClick={() => run(() => api(`/calendars/${calendar.calendar_id}/submit`, { method: 'POST' }))}
-            >
-              {credit?.credit_status === 'failed' ? t('mrv.resubmit') : t('mrv.submit')} · {fmt.num(mrv.reduction_tco2e)} tCO₂e
-            </Button>
-            {!harvested && <p className="text-xs text-stone-500">{t('mrv.afterHarvest')}</p>}
-            {harvested && mrv.reduction_tco2e <= 0 && <p className="text-xs text-stone-500">{t('mrv.nothingToClaim')}</p>}
-          </>
-        )}
-        <ErrorBox error={error} />
+        {!harvested && <p className="text-xs text-stone-500">{t('mrv.afterHarvest')}</p>}
       </Card>
     </div>
   )
@@ -417,6 +274,7 @@ const TABS = [
 
 export default function CalendarDetail() {
   const { calendarId } = useParams()
+  const { user } = useAuth()
   const { t, fmt } = usePreferences()
   const { data: calendar, error, loading, reload } = useApi(`/calendars/${calendarId}`)
   const [tab, setTab] = useState('water')
@@ -428,11 +286,15 @@ export default function CalendarDetail() {
     calendar.rice_variety,
     `${fmt.date(calendar.planting_date)} – ${calendar.harvest_date ? fmt.date(calendar.harvest_date) : t('common.present')}`,
     t(`calendarStatus.${calendar.status}`),
+    calendar.harvest_kg != null &&
+      t('records.harvestSummary', { kg: fmt.num(calendar.harvest_kg, 0), perRai: fmt.num(calendar.yield_kg_per_rai, 0) }),
     calendar.current_stage && t('calendar.stage', { stage: fmt.stage(calendar.current_stage.stage_no) }),
   ]
   return (
     <>
-      <Link to={`/paddies/${calendar.paddy.paddy_id}`} className="text-sm text-stone-500 hover:text-green-800">
+      {/* Back to where this crop is listed: the dashboard (growing) or History (harvested) for
+          the farmer, the farmer's page for a verifier */}
+      <Link to={user.role !== 'farmer' ? `/farmers/${calendar.paddy.owner_user_id}` : calendar.harvest_date ? '/history' : '/'} className="text-sm text-stone-500 hover:text-green-800">
         ← {calendar.paddy.paddy_name}
       </Link>
       <PageTitle title={fmt.season(calendar)} subtitle={subtitle.filter(Boolean).join(' · ')} />
@@ -452,7 +314,7 @@ export default function CalendarDetail() {
       </div>
       {tab === 'water' && <WaterTab calendar={calendar} />}
       {tab === 'records' && <RecordsTab calendar={calendar} reload={reload} />}
-      {tab === 'mrv' && <MrvTab calendar={calendar} reload={reload} />}
+      {tab === 'mrv' && <MrvTab calendar={calendar} />}
     </>
   )
 }

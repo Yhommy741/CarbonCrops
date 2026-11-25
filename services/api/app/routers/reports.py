@@ -1,19 +1,19 @@
-"""Certificates: carbon credits a verifier passed (one per crop calendar)."""
+"""Certificates: carbon credits a verifier passed (one per crop calendar), opened from History."""
 
 from fastapi import APIRouter, Depends
 
 from ..access import paddy_access_sql
 from ..auth import current_user
-from ..db import fetch_all, fetch_one, get_db
+from ..db import fetch_one, get_db
 from ..errors import api_error
 from ..services.calendar import describe
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 REPORT_SQL = """
-SELECT cc.credit_id, cc.credit_tco2e, cc.credit_status, cc.amount_thb, cc.submitted_at,
+SELECT cc.credit_id, cc.credit_tco2e, cc.credit_status, cc.submitted_at,
        cc.verified_at, cc.verify_comment,
-       fc.calendar_id, fc.paddy_id, fc.rice_variety, fc.planting_date, fc.harvest_date,
+       fc.calendar_id, fc.paddy_id, fc.rice_variety, fc.planting_date, fc.harvest_date, fc.harvest_kg,
        p.paddy_name, p.area_rai, p.province, p.district, p.subdistrict,
        p.latitude, p.longitude, p.land_doc_no,
        owner.display_name AS farmer_name, rev.display_name AS verifier_name
@@ -31,13 +31,6 @@ def _report(row):
     # The table has no report number; a short, stable one from the credit id
     row["report_no"] = "CC-" + row["credit_id"][:8].upper()
     return row
-
-
-@router.get("")
-def list_reports(user=Depends(current_user), conn=Depends(get_db)):
-    where, params = paddy_access_sql(user)
-    rows = fetch_all(conn, f"{REPORT_SQL} AND {where} ORDER BY cc.verified_at DESC", **params)
-    return [_report(r) for r in rows]
 
 
 @router.get("/{credit_id}")

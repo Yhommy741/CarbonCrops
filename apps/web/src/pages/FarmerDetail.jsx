@@ -11,7 +11,8 @@ function CalendarRow({ c }) {
         <span>
           <span className="block text-sm font-medium">{fmt.season(c)}</span>
           <span className="text-xs text-stone-500">
-            {c.rice_variety} · {fmt.date(c.planting_date)} – {c.harvest_date ? fmt.date(c.harvest_date) : t('common.present')}
+            {c.rice_variety && `${c.rice_variety} · `}
+            {fmt.date(c.planting_date)} – {c.harvest_date ? fmt.date(c.harvest_date) : t('common.present')}
           </span>
         </span>
         <span className="text-right">
@@ -73,12 +74,11 @@ export default function FarmerDetail() {
             <div>
               <p className="font-medium">{p.paddy_name}</p>
               <p className="text-xs text-stone-500">
-                {t('common.rai', { n: fmt.num(p.area_rai) })} · {[p.subdistrict, p.district, p.province].filter(Boolean).join(', ')}
+                {[t('common.rai', { n: fmt.num(p.area_rai) }), [p.subdistrict, p.district, p.province].filter(Boolean).join(', ')]
+                  .filter(Boolean)
+                  .join(' · ')}
               </p>
             </div>
-            <Link to={`/paddies/${p.paddy_id}`} className="whitespace-nowrap text-xs text-green-800 underline">
-              {t('farmers.openPaddy')}
-            </Link>
           </div>
           {p.calendars.length === 0 ? (
             <Empty>{t('farmers.noCrops')}</Empty>

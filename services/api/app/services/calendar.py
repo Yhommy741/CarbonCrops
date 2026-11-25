@@ -32,10 +32,20 @@ def calendar_status(calendar, today=None):
     return "active"
 
 
+def yield_per_rai(harvest_kg, area_rai):
+    """Harvest yield in kg per rai (the farmer enters the paddy's total kg); None if unknown."""
+    if harvest_kg is None or not area_rai:
+        return None
+    return round(float(harvest_kg) / float(area_rai), 1)
+
+
 def describe(calendar, today=None):
-    """Add the derived fields to a farming_calendars row (in place) and return it."""
+    """Add the derived fields to a farming_calendars row (in place) and return it.
+    With harvest_kg and area_rai in the row, also its yield_kg_per_rai."""
     calendar["season"], calendar["season_year"] = season(calendar["planting_date"])
     calendar["status"] = calendar_status(calendar, today)
+    if "harvest_kg" in calendar:
+        calendar["yield_kg_per_rai"] = yield_per_rai(calendar["harvest_kg"], calendar.get("area_rai"))
     return calendar
 
 

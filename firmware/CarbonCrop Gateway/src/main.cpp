@@ -13,8 +13,6 @@
 // each one as JSON to Mosquitto (MQTT_TOPIC_WATER). services/api/app/mqtt_bridge.py
 // stores them in the database.
 
-constexpr int32_t LOCAL_UTC_OFFSET_S = 7 * 3600;   // print times in UTC+7
-
 // Drop a partial packet if no new byte arrives for this long
 constexpr uint32_t RX_GAP_TIMEOUT_MS = 500;
 
@@ -68,12 +66,13 @@ static void printPacket(const ccp::WaterLevelPacket &p) {
 }
 
 // ---- MQTT ----------------------------------------------------------------------
-// {"gw":"GW-01","node":1,"seq":42,"lat":13.736717,"lon":100.523186,
-//  "samples":[[1795410000,-61],[1795410001,null],...]}   (unix UTC, mm)
+// {"gw":"GW-01","node":1,"seq":42,"lat":13.736717,"lon":100.523186,"tz":25200,
+//  "samples":[[1795410000,-61],[1795410001,null],...]}
+// samples = [unix time (UTC), mm]; tz = local UTC offset in seconds (LOCAL_UTC_OFFSET_S)
 static size_t toJson(const ccp::WaterLevelPacket &p, char *buf, size_t len) {
     int n = snprintf(buf, len,
-                     "{\"gw\":\"%s\",\"node\":%u,\"seq\":%u,\"lat\":%.6f,\"lon\":%.6f,\"samples\":[",
-                     GATEWAY_ID, p.nodeId, p.seq, p.latE6 / 1e6, p.lonE6 / 1e6);
+                     "{\"gw\":\"%s\",\"node\":%u,\"seq\":%u,\"lat\":%.6f,\"lon\":%.6f,\"tz\":%ld,\"samples\":[",
+                     GATEWAY_ID, p.nodeId, p.seq, p.latE6 / 1e6, p.lonE6 / 1e6, (long)LOCAL_UTC_OFFSET_S);
     for (uint8_t i = 0; i < p.count && n > 0 && (size_t)n < len; i++) {
         const ccp::Sample &s = p.samples[i];
         if (s.waterLevelMm == ccp::LEVEL_INVALID)

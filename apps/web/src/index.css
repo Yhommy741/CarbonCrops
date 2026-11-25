@@ -5,6 +5,13 @@
 
 @theme {
   --font-sans: 'Noto Sans Thai', system-ui, 'Segoe UI', sans-serif;
+  /* Navigation bars: a solid brand green with white content. Separate from the green-*
+     scale because that one is mirrored in dark mode (below), which would make the bar pale. */
+  --color-nav: #166534; /* = theme-color in index.html and the manifest */
+  --color-nav-ink: #ffffff;
+  --color-nav-muted: rgb(255 255 255 / 0.85);
+  --color-nav-hover: rgb(255 255 255 / 0.12);
+  --color-nav-active: rgb(255 255 255 / 0.15);
 }
 
 :root {
@@ -27,6 +34,7 @@
     --page-bg: #0f0d0c;
     --page-text: #e7e5e4;
     --color-white: #1c1917;
+    --color-nav: #14532d; /* a deeper green, easier on the eyes at night */
     --color-stone-50: oklch(14.7% 0.004 49.25);
     --color-stone-100: oklch(21.6% 0.006 56.043);
     --color-stone-200: oklch(26.8% 0.007 34.298);
