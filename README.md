@@ -68,9 +68,10 @@ CarbonCrops/
 ├── firmware/
 │   ├── CarbonCrop Gateway/      PlatformIO project: ESP32 LoRa gateway (LoRa → WiFi/MQTT)
 │   └── CarbonCrop Sensor Node/  PlatformIO project: ESP32 sensor node (ultrasonic + LoRa)
-│                                (each has its own copy of the E220 LoRa driver in include/E220.h)
+│                                (both use the E220 LoRa driver in shared/drivers/E220.h)
 ├── shared/
-│   └── protocol/                LoRa packet format + radio settings shared by gateway and sensor node
+│   ├── protocol/                LoRa packet format + radio settings shared by gateway and sensor node
+│   └── drivers/                 E220 LoRa driver shared by gateway and sensor node
 ├── hardware/
 │   ├── mechanics/               Mechanical design (3D models, enclosures, mounts)
 │   └── electronics/             Electronic design (schematics, PCB, wiring)
@@ -398,7 +399,7 @@ Both are **PlatformIO** projects for the **ESP32 DOIT DevKit V1** with an **EBYT
 
 From a terminal instead: `pio run -t upload -t monitor` inside the project folder.
 
-Both projects use the shared files in `shared/protocol/` (packet format, radio channel), and each has its own copy of the E220 driver in `include/E220.h`. **Change these for both devices at the same time** (keep the two `E220.h` copies identical), or they won't understand each other.
+Both projects use the shared files in `shared/protocol/` (packet format, radio channel), and the E220 driver in `shared/drivers/E220.h`. **Reflash both devices after changing these**, or they won't understand each other.
 
 ### 7.2 Wiring (both boards)
 
@@ -424,7 +425,7 @@ read GPS                                   (once per packet)
 repeat APP_SAMPLES_PER_PACKET (10) times:
     read RTC         -> time of this sample
     read ultrasonic  -> one reading, APP_ULTRASONIC_READS (10) times, 500 ms apart
-    filter           -> keep only valid readings, median -> water level
+    filter           -> keep only valid readings, mean -> water level
     wait until APP_SAMPLE_INTERVAL_MS (10 s) after this sample started
 send the packet over LoRa
 wait APP_PACKET_PAUSE_MS (0), then start again
@@ -444,7 +445,7 @@ Samples run on a fixed schedule, so the time a measurement or a send takes doesn
 | | `APP_ULTRASONIC_READ_INTERVAL_MS` | `500` | Time between those readings |
 | | `APP_PACKET_PAUSE_MS` | `0` | Extra wait after sending, before the next packet |
 | | `APP_STARTUP_DELAY_MS` | `2000` | Wait after boot before the first sample |
-| | `APP_ULTRASONIC_FILTER` | `Median` | Filter type (`Filter.h`: Mean / Median / TrimmedMean); `APP_ULTRASONIC_MIN_VALID` (5) valid readings needed |
+| | `APP_ULTRASONIC_FILTER` | `Mean` | Filter type (`Filter.h`: Mean / Median / TrimmedMean); `APP_ULTRASONIC_MIN_VALID` (5) valid readings needed |
 | `include/PipeConfig.h` | `PIPE_SENSOR_TO_GROUND_CM` | `50` | Distance from the sensor face down to the soil surface. Measure it after installing the pipe. Water level = this − measured distance |
 | `include/HCSR04.h` | `HCSR04_CAL_SCALE` / `HCSR04_CAL_OFFSET_CM` | `1` / `0` | Calibration of the filtered distance (two known distances with a ruler) |
 | | `HCSR04_TEMPERATURE_C`, range, warm-up | `30 °C`, 20–450 cm, 500 ms | Sensor constants |

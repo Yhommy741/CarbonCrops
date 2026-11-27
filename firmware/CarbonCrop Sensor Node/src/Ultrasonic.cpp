@@ -26,6 +26,13 @@ void ultrasonicPowerOff() {
     digitalWrite(PIN_ULTRASONIC_POWER, LOW);
 }
 
+void ultrasonicEnd() {
+    ultrasonicPowerOff();
+    pinMode(PIN_ULTRASONIC_POWER, INPUT);
+    pinMode(PIN_ULTRASONIC_TRIG, INPUT);
+    pinMode(PIN_ULTRASONIC_ECHO, INPUT);
+}
+
 float ultrasonicReadCm(float temperatureC) {
     digitalWrite(PIN_ULTRASONIC_TRIG, LOW);
     delayMicroseconds(2);

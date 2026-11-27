@@ -16,6 +16,9 @@ void ultrasonicBegin();
 void ultrasonicPowerOn();
 void ultrasonicPowerOff();
 
+// Power off and float all sensor pins (deep sleep). ultrasonicBegin() again after.
+void ultrasonicEnd();
+
 // One reading: distance from the sensor face [cm], or NAN when there is no
 // echo or it is outside HCSR04_MIN/MAX_DISTANCE_CM. Blocks up to ~30 ms.
 float ultrasonicReadCm(float temperatureC = HCSR04_TEMPERATURE_C);

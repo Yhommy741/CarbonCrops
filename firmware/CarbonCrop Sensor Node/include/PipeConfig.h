@@ -22,6 +22,6 @@
 // =============================================================================
 
 // Sensor face to the soil surface [cm]
-#define PIPE_SENSOR_TO_GROUND_CM  50.0f
+#define PIPE_SENSOR_TO_GROUND_CM  30.0f
 
 static_assert(PIPE_SENSOR_TO_GROUND_CM > 0.0f, "PIPE_SENSOR_TO_GROUND_CM must be > 0");

@@ -1,8 +1,8 @@
 #pragma once
 // =============================================================================
 //  E220.h — minimal driver for EBYTE E220 LoRa UART modules (LLCC68)
-//  Header-only. The gateway and the sensor node each have a copy in
-//  include/E220.h: change both the same way.
+//  Header-only, shared by the gateway and the sensor node
+//  (both platformio.ini files add -I ../../shared/drivers).
 //
 //  Wiring (ESP32):
 //      E220 TXD -> ESP32 RX pin      E220 M0  -> GPIO

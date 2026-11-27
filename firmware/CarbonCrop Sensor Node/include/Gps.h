@@ -15,8 +15,11 @@ struct GpsFix {
     bool   valid;       // false = no fix (the packet then carries 0, 0)
 };
 
-// Start the GPS. Call once in setup().
+// Start the GPS UART (Serial1). The module must be powered (powerGps(true)).
 void gpsBegin();
+
+// Stop the UART and float the GPS pins before its power is cut.
+void gpsEnd();
 
 // Read the current position. Returns fix.valid.
 bool gpsRead(GpsFix &fix);

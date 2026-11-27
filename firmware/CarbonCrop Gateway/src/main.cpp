@@ -8,6 +8,7 @@
 #include "E220.h"
 #include "CarbonCropPacket.h"
 #include "LoRaConfig.h"
+#include "PowerLogger.h"
 
 // Receive CarbonCrop water level packets from the E220, print them, and publish
 // each one as JSON to Mosquitto (MQTT_TOPIC_WATER). services/api/app/mqtt_bridge.py
@@ -209,6 +210,8 @@ void setup() {
     mqtt.setBufferSize(640);    // JSON (~300 B) + topic + MQTT header
     mqtt.setSocketTimeout(3);   // don't block LoRa for long if the broker is gone
 
+    powerlog::begin();
+
     Serial.println(F("Listening..."));
 }
 
@@ -229,4 +232,5 @@ void loop() {
     }
 
     maintainMqtt();
+    powerlog::update();
 }

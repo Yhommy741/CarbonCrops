@@ -1,83 +1,96 @@
 // =============================================================================
 //  App.cpp — measurement state machine of the sensor node
 //
-//   ReadGps ─▶ WaitSample ─▶ ReadRtc ─▶ UltrasonicOn ─▶ ReadUltrasonic ─▶ Filter ─┐
-//                 ▲                    (warm-up)       (1 reading,  ↺    (valid    │
-//                 │                                     x READS)          only)    │
-//                 └─────────────────── more samples ──────────────────────────────┤
-//                                                                   packet full    │
-//   ReadGps ◀── Pause ◀── Send ◀──────────────────────────────────────────────────┘
+//  Every wake takes one sample, then deep-sleeps. The packet being filled is
+//  kept in RTC memory, which survives deep sleep.
 //
-//  Ultrasonic.h only takes single readings; this file repeats them and hands
-//  them to Filter.h. Timing comes from AppConfig.h. Samples start on a fixed
-//  schedule (start + i * APP_SAMPLE_INTERVAL_MS), so the time the readings or
-//  a send take doesn't make the interval drift. Waits never block loop().
+//  [OpMode::Read]         ReadRtc ─▶ UltrasonicOn ─▶ ReadUltrasonic ─▶ Filter
+//                           ─▶ Sleep
+//  [OpMode::ReadGpsLora]  PowerSettle ─▶ WaitGps ─▶ (same as Read) ─▶ Send
+//                           ─▶ Sleep
+//  [OpMode::Sleep]        Sleep
+//
+//  Hardware lives in the modules: Power (MOSFETs, deep sleep), Radio (E220),
+//  Gps, Rtc, Ultrasonic, Filter. Timing: AppConfig.h.
 // =============================================================================
 #include "App.h"
 
+#include <esp_attr.h>
+#include <esp_timer.h>
+
 #include "AppConfig.h"
 #include "CarbonCropPacket.h"
-#include "E220.h"
-#include "Filter.h"
 #include "Gps.h"
-#include "LoRaConfig.h"
 #include "HCSR04.h"
 #include "NodeConfig.h"
 #include "PinConfig.h"
 #include "PipeConfig.h"
+#include "Power.h"
+#include "Radio.h"
 #include "Rtc.h"
 #include "Ultrasonic.h"
 
+// ---- Kept through deep sleep (RTC memory; reset on power-on) -----------------
+RTC_DATA_ATTR static ccp::WaterLevelPacket rtcPkt;
+RTC_DATA_ATTR static uint8_t  rtcSampleIdx = 0;   // samples already in rtcPkt
+RTC_DATA_ATTR static uint16_t rtcTxSeq     = 0;
+RTC_DATA_ATTR static OpMode   rtcMode      = OpMode::Read;
+RTC_DATA_ATTR static bool     rtcAutoCycle = true;
+
+// ---- States within one wake -----------------------------------------------------
 enum class State : uint8_t {
-    ReadGps,          // start a new packet: position
-    WaitSample,       // wait for the next sample's start time
-    ReadRtc,          // timestamp of this sample
-    UltrasonicOn,     // power the sensor, wait HCSR04_WARMUP_MS
-    ReadUltrasonic,   // one reading, repeated APP_ULTRASONIC_READS times
-    Filter,           // valid readings -> filter -> calibrate -> water level
-    Send,             // packet full: send over LoRa
-    Pause,            // APP_PACKET_PAUSE_MS before the next packet
+    PowerSettle,      // GPS + LoRa just powered: wait POWER_SETTLE_MS, start them
+    WaitGps,          // read GPS until a fix or APP_GPS_TIMEOUT_MS
+    ReadRtc,          // timestamp of this sample, power on the ultrasonic
+    UltrasonicOn,     // wait HCSR04_WARMUP_MS
+    ReadUltrasonic,   // APP_ULTRASONIC_READS readings
+    Filter,           // filter -> water level -> into rtcPkt
+    Send,             // send rtcPkt over LoRa
+    Sleep,            // everything off, deep sleep
 };
 
-static E220 lora(Serial2, PIN_E220_TXD, PIN_E220_RXD,
-                 PIN_E220_M0, PIN_E220_M1, PIN_E220_AUX);
+static State    state       = State::Sleep;
+static uint32_t waitUntilMs = 0;
+static float    readingsCm[APP_ULTRASONIC_READS];
+static uint8_t  readIdx     = 0;
 
-static State    state = State::ReadGps;
-static uint32_t nextSampleMs = 0;   // millis() when the next sample starts
-static uint32_t waitUntilMs = 0;    // warm-up / between readings / pause
-static uint8_t  sampleIdx = 0;      // sample in this packet
-static uint16_t txSeq = 0;
-static ccp::WaterLevelPacket pkt;
+// ---- Helpers ------------------------------------------------------------------
 
-// Readings of the current sample (cm from the sensor face, NAN = invalid)
-static float   readingsCm[APP_ULTRASONIC_READS];
-static uint8_t readIdx = 0;
-
-static const char *stateName(State s) {
-    switch (s) {
-        case State::ReadGps:        return "ReadGps";
-        case State::WaitSample:     return "WaitSample";
-        case State::ReadRtc:        return "ReadRtc";
-        case State::UltrasonicOn:   return "UltrasonicOn";
-        case State::ReadUltrasonic: return "ReadUltrasonic";
-        case State::Filter:         return "Filter";
-        case State::Send:           return "Send";
-        case State::Pause:          return "Pause";
+static const char *modeName(OpMode m) {
+    switch (m) {
+        case OpMode::Sleep:       return "SLEEP";
+        case OpMode::Read:        return "READ";
+        case OpMode::ReadGpsLora: return "READ+GPS+LORA";
     }
     return "?";
 }
 
-static void enter(State s) {
-    state = s;
-}
-
-// true once millis() has reached t (safe across the 49-day millis() wrap)
 static bool reached(uint32_t t) {
     return (int32_t)(millis() - t) >= 0;
 }
 
-// Water level from the calibrated distance (sensor face -> water surface).
-// PipeConfig.h: > 0 above the ground, < 0 below it (inside the pipe).
+static void blink(uint8_t count) {
+    for (uint8_t i = 0; i < count; i++) {
+        digitalWrite(PIN_STATUS_LED, HIGH);
+        delay(80);
+        digitalWrite(PIN_STATUS_LED, LOW);
+        delay(120);
+    }
+}
+
+// The wake that takes the last sample of a packet also sends it
+static OpMode autoMode() {
+    return (rtcSampleIdx + 1 >= APP_SAMPLES_PER_PACKET) ? OpMode::ReadGpsLora
+                                                        : OpMode::Read;
+}
+
+static void startPacket() {
+    rtcPkt        = {};
+    rtcPkt.nodeId = NODE_ID;
+    rtcPkt.seq    = rtcTxSeq;
+    rtcSampleIdx  = 0;
+}
+
 static float waterLevelCm(float distanceCm) {
     return PIPE_SENSOR_TO_GROUND_CM - distanceCm;
 }
@@ -87,68 +100,71 @@ static int16_t levelCmToMm(float levelCm) {
     return (int16_t)lroundf(levelCm * 10.0f);
 }
 
-// ---- Steps -------------------------------------------------------------------
+// ---- Steps --------------------------------------------------------------------
 
-static void stepReadGps() {
-    GpsFix fix;
+static void stepPowerSettle() {
+    if (!reached(waitUntilMs)) return;
+    gpsBegin();
+    radioBegin();
+    waitUntilMs = millis() + APP_GPS_TIMEOUT_MS;
+    state = State::WaitGps;
+}
+
+static void stepWaitGps() {
+    GpsFix fix = {};
     gpsRead(fix);
+    if (!fix.valid && !reached(waitUntilMs)) return;   // keep waiting
 
-    pkt = {};
-    pkt.nodeId = NODE_ID;
-    pkt.seq    = txSeq;
-    pkt.latE6  = fix.valid ? (int32_t)lround(fix.latitude * 1e6) : 0;
-    pkt.lonE6  = fix.valid ? (int32_t)lround(fix.longitude * 1e6) : 0;
-    pkt.count  = 0;
-    sampleIdx  = 0;
+    rtcPkt.latE6 = fix.valid ? (int32_t)lround(fix.latitude  * 1e6) : 0;
+    rtcPkt.lonE6 = fix.valid ? (int32_t)lround(fix.longitude * 1e6) : 0;
+    if (fix.valid)
+        Serial.printf("[WaitGps] GPS %.6f, %.6f\n", fix.latitude, fix.longitude);
+    else
+        Serial.println(F("[WaitGps] GPS no fix (timeout)"));
 
-    Serial.printf("\n[%s] packet seq=%u  ", stateName(state), pkt.seq);
-    if (fix.valid) Serial.printf("GPS %.6f, %.6f\n", fix.latitude, fix.longitude);
-    else           Serial.println(F("GPS no fix"));
-
-    enter(State::WaitSample);
+    state = State::ReadRtc;
 }
 
 static void stepReadRtc() {
-    pkt.samples[sampleIdx].unixTime = (uint32_t)rtcNow();
+    rtcPkt.samples[rtcSampleIdx].unixTime = (uint32_t)rtcNow();
+
     if (USE_DUMMY_DATA) {
-        enter(State::Filter);   // no sensor: Filter uses the dummy level
+        state = State::Filter;
         return;
     }
+    ultrasonicBegin();
     ultrasonicPowerOn();
-    digitalWrite(PIN_STATUS_LED, HIGH);
     waitUntilMs = millis() + HCSR04_WARMUP_MS;
-    enter(State::UltrasonicOn);
+    state = State::UltrasonicOn;
 }
 
 static void stepUltrasonicOn() {
     if (!reached(waitUntilMs)) return;
     readIdx = 0;
     waitUntilMs = millis();   // first reading right away
-    enter(State::ReadUltrasonic);
+    state = State::ReadUltrasonic;
 }
 
 static void stepReadUltrasonic() {
     if (!reached(waitUntilMs)) return;
 
     readingsCm[readIdx++] = ultrasonicReadCm();   // one reading, NAN = invalid
-
     if (readIdx < APP_ULTRASONIC_READS) {
         waitUntilMs += APP_ULTRASONIC_READ_INTERVAL_MS;
         return;   // stay here for the next reading
     }
     ultrasonicPowerOff();
-    digitalWrite(PIN_STATUS_LED, LOW);
-    enter(State::Filter);
+    state = State::Filter;
 }
 
 static void stepFilter() {
-    ccp::Sample &s = pkt.samples[sampleIdx];
+    ccp::Sample &s = rtcPkt.samples[rtcSampleIdx];
     char ts[24];
     rtcFormatLocal(s.unixTime, ts, sizeof(ts));
-    Serial.printf("  #%u/%u %s  ", sampleIdx + 1, APP_SAMPLES_PER_PACKET, ts);
+    Serial.printf("  #%u/%u %s  ", rtcSampleIdx + 1, APP_SAMPLES_PER_PACKET, ts);
 
     if (USE_DUMMY_DATA) {
-        s.waterLevelMm = DUMMY_WATER_LEVEL_MM[sampleIdx % DUMMY_WATER_LEVEL_COUNT];
+        s.waterLevelMm = DUMMY_WATER_LEVEL_MM[rtcSampleIdx % DUMMY_WATER_LEVEL_COUNT];
         Serial.printf("water level=%.1f cm (dummy)\n", s.waterLevelMm / 10.0f);
     } else {
         FilterResult f = filterApply(readingsCm, APP_ULTRASONIC_READS,
@@ -177,89 +193,108 @@ static void stepFilter() {
         Serial.println();
     }
 
-    sampleIdx++;
-    pkt.count = sampleIdx;
-
-    // Next sample on the fixed schedule; if we're already late, start from now
-    nextSampleMs += APP_SAMPLE_INTERVAL_MS;
-    if (reached(nextSampleMs)) {
-        Serial.println(F("  [warn] sample took longer than APP_SAMPLE_INTERVAL_MS"));
-        nextSampleMs = millis();
-    }
-
-    enter(sampleIdx >= APP_SAMPLES_PER_PACKET ? State::Send : State::WaitSample);
+    rtcSampleIdx++;
+    rtcPkt.count = rtcSampleIdx;
+    state = (rtcMode == OpMode::ReadGpsLora) ? State::Send : State::Sleep;
 }
 
 static void stepSend() {
-    ccp::finalize(pkt);
+    ccp::finalize(rtcPkt);
     digitalWrite(PIN_STATUS_LED, HIGH);
-    bool sent = lora.send(&pkt, sizeof(pkt));
+    bool sent = radioSend(&rtcPkt, sizeof(rtcPkt));
     digitalWrite(PIN_STATUS_LED, LOW);
 
-    Serial.printf("[%s] node=%u seq=%u  %u samples  %u bytes  %s\n",
-                  stateName(state), pkt.nodeId, pkt.seq, pkt.count,
-                  (unsigned)sizeof(pkt), sent ? "sent" : "FAILED (AUX timeout)");
-    txSeq++;
+    Serial.printf("[Send] node=%u seq=%u  %u samples  %u bytes  %s\n",
+                  rtcPkt.nodeId, rtcPkt.seq, rtcPkt.count,
+                  (unsigned)sizeof(rtcPkt), sent ? "sent" : "FAILED (AUX timeout)");
 
-    if (APP_PACKET_PAUSE_MS > 0) {
-        waitUntilMs = millis() + APP_PACKET_PAUSE_MS;
-        enter(State::Pause);
-    } else {
-        enter(State::ReadGps);
+    rtcTxSeq++;
+    startPacket();
+    state = State::Sleep;
+}
+
+static void stepSleep() {
+    // Float every module pin before the power is cut, so nothing leaks into
+    // an unpowered module
+    ultrasonicEnd();
+    gpsEnd();
+    radioEnd();
+    pinMode(PIN_STATUS_LED, INPUT);
+
+    // Subtract this wake's time (since boot) so wakes stay APP_SAMPLE_INTERVAL_MS apart
+    const uint64_t periodUs   = (uint64_t)APP_SAMPLE_INTERVAL_MS * 1000ULL;
+    const uint64_t minSleepUs = (uint64_t)APP_MIN_SLEEP_MS * 1000ULL;
+    const uint64_t awakeUs    = (uint64_t)esp_timer_get_time();
+    const uint64_t sleepUs    = (awakeUs + minSleepUs < periodUs) ? periodUs - awakeUs
+                                                                  : minSleepUs;
+
+    Serial.printf("[Sleep] awake %.1f s, deep sleep %.1f s (next: sample %u/%u)\n",
+                  awakeUs / 1e6, sleepUs / 1e6,
+                  rtcSampleIdx + 1, APP_SAMPLES_PER_PACKET);
+    Serial.flush();
+
+    powerDeepSleep(sleepUs);
+}
+
+// ---- Public API -----------------------------------------------------------------
+
+void appSetMode(OpMode mode, bool autoCycle) {
+    rtcMode      = mode;
+    rtcAutoCycle = autoCycle;
+
+    switch (mode) {
+        case OpMode::Sleep:
+            state = State::Sleep;
+            break;
+
+        case OpMode::Read:
+            blink(1);
+            state = State::ReadRtc;
+            break;
+
+        case OpMode::ReadGpsLora:
+            blink(2);
+            powerGps(true);
+            powerLora(true);
+            waitUntilMs = millis() + POWER_SETTLE_MS;
+            state = State::PowerSettle;
+            break;
     }
 }
 
-static void stepPause() {
-    if (!reached(waitUntilMs)) return;
-    if (reached(nextSampleMs)) nextSampleMs = millis();   // keep the schedule after the pause
-    enter(State::ReadGps);
+OpMode appGetMode() {
+    return rtcMode;
 }
-
-// ---- Public --------------------------------------------------------------------
 
 void appBegin() {
+    powerBegin();
     pinMode(PIN_STATUS_LED, OUTPUT);
     digitalWrite(PIN_STATUS_LED, LOW);
-
-    Serial.printf("\nCarbonCrop sensor node %u%s\n", NODE_ID,
-                  USE_DUMMY_DATA ? "  (dummy water levels)" : "");
-    Serial.printf("%u samples per packet, one every %lu s, %u readings each (%s)\n",
-                  APP_SAMPLES_PER_PACKET,
-                  (unsigned long)(APP_SAMPLE_INTERVAL_MS / 1000),
-                  APP_ULTRASONIC_READS, filterTypeName(APP_ULTRASONIC_FILTER));
-
     rtcBegin();
-    gpsBegin();
-    ultrasonicBegin();
 
-    if (!lora.begin()) {
-        Serial.println(F("E220: AUX stays LOW - check power and wiring"));
+    if (rtcSampleIdx == 0) startPacket();
+    if (rtcSampleIdx >= ccp::MAX_SAMPLES) {   // only with a forced Read mode
+        Serial.println(F("[warn] packet full without a send - samples dropped"));
+        startPacket();
     }
-    bool changed = false;
-    if (!lora.ensureChannel(E220_CHANNEL, &changed)) {
-        Serial.println(F("E220: no reply to config read/write"));
-    } else if (changed) {
-        Serial.printf("E220: channel set to %u (%.3f MHz) and saved\n",
-                      E220_CHANNEL, E220_BASE_FREQ_MHZ + E220_CHANNEL);
-    }
-    E220::Registers reg;
-    if (lora.readConfig(reg)) E220::printConfig(Serial, reg, E220_BASE_FREQ_MHZ);
+    if (rtcAutoCycle) rtcMode = autoMode();
 
-    nextSampleMs = millis() + APP_STARTUP_DELAY_MS;
-    enter(State::ReadGps);
+    Serial.printf("\nCarbonCrop sensor node %u | wake: %s (sample %u/%u)\n",
+                  NODE_ID, modeName(rtcMode),
+                  rtcSampleIdx + 1, APP_SAMPLES_PER_PACKET);
+
+    appSetMode(rtcMode, rtcAutoCycle);
 }
 
 void appLoop() {
     switch (state) {
-        case State::ReadGps:        stepReadGps();        break;
-        case State::WaitSample:
-            if (reached(nextSampleMs)) enter(State::ReadRtc);
-            break;
+        case State::PowerSettle:    stepPowerSettle();    break;
+        case State::WaitGps:        stepWaitGps();        break;
         case State::ReadRtc:        stepReadRtc();        break;
         case State::UltrasonicOn:   stepUltrasonicOn();   break;
         case State::ReadUltrasonic: stepReadUltrasonic(); break;
         case State::Filter:         stepFilter();         break;
         case State::Send:           stepSend();           break;
-        case State::Pause:          stepPause();          break;
+        case State::Sleep:          stepSleep();          break;
     }
 }

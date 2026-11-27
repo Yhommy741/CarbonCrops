@@ -25,12 +25,24 @@
 #define PIN_BATTERY_ADC  35
 
 // ---- LoRa module: EBYTE E220 (UART) on Serial2 ------------------------------
-// E220 VCC -> 3V3. GPIO34 is input-only, which is fine for AUX.
+// E220 VCC is switched by a MOSFET on PIN_FET_LORA (see Power.h).
+// GPIO34 is input-only, which is fine for AUX.
 #define PIN_E220_TXD  16   // E220 TXD -> ESP32 RX2
 #define PIN_E220_RXD  17   // E220 RXD <- ESP32 TX2
 #define PIN_E220_M0   32
 #define PIN_E220_M1   33
 #define PIN_E220_AUX  34
+
+// ---- GPS module (UART) on Serial1 -------------------------------------------
+// GPS VCC is switched by a MOSFET on PIN_FET_GPS (see Power.h).
+#define PIN_GPS_RX  18   // GPS TX -> ESP32 RX1
+#define PIN_GPS_TX  19   // GPS RX <- ESP32 TX1
+
+// ---- Power switches (MOSFET gates, HIGH = module on) ------------------------
+// Held LOW through deep sleep (gpio_hold_en), so the modules stay off.
+// GPIO13/14 are RTC-capable, which the hold needs.
+#define PIN_FET_GPS   13
+#define PIN_FET_LORA  14
 
 // ---- Status LED -------------------------------------------------------------
 #define PIN_STATUS_LED  2   // on-board blue LED on DOIT DevKit V1

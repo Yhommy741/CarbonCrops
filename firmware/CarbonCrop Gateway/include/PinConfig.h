@@ -15,3 +15,8 @@
 
 // ---- Status LED -------------------------------------------------------------
 #define PIN_STATUS_LED  2   // on-board blue LED, blinks on RX
+
+// ---- INA219 current sensor (I2C, lab power logging) -------------------------
+// INA219 VCC -> 3V3, GND -> GND (common with the sensor node's GND)
+#define PIN_INA219_SDA  21
+#define PIN_INA219_SCL  22

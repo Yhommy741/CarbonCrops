@@ -1,5 +1,6 @@
 #include "Rtc.h"
 
+#include <esp_system.h>
 #include <sys/time.h>
 
 #include "NodeConfig.h"
@@ -16,6 +17,10 @@ static int32_t daysFromCivil(int y, unsigned m, unsigned d) {
 
 // Placeholder: set the ESP32 system clock from the firmware build time (local time)
 void rtcBegin() {
+    // The ESP32 system clock keeps running through deep sleep: only set it on a
+    // real power-on/reset, otherwise every wake would jump back to build time.
+    if (esp_reset_reason() == ESP_RST_DEEPSLEEP) return;
+
     static const char kMonths[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
     char mon[4] = {0};
     int day, year, hh, mm, ss;

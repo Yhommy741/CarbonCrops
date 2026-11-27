@@ -20,9 +20,10 @@ Full details: [main README, sections 6 and 7](../../README.md#6-sensor-data-gate
 | `src/main.cpp` | LoRa receive + CRC check, outbox (32 packets while offline), WiFi/MQTT |
 | `include/NetConfig.h` | `GATEWAY_ID` (`GW-01`), MQTT topics, retry interval, outbox size |
 | `include/Secrets.h` | WiFi and broker settings (your copy, not in git) |
-| `include/PinConfig.h` | E220 and LED pins |
+| `include/PinConfig.h` | E220, LED and INA219 pins |
+| `include/PowerLogger.h`, `src/PowerLogger.cpp` | Lab test: INA219 on I2C (SDA 21, SCL 22) measures the sensor node supply and prints CSV `Time_s,Voltage_V,Current_mA,Power_mW` every 100 ms. Off by default: build the `powerlog` environment (`pio run -e powerlog -t upload`) to turn it on |
 | `../../shared/protocol/` | Packet format and radio channel (shared with the sensor node) |
-| `include/E220.h` | E220 driver (the sensor node has an identical copy; change both) |
+| `../../shared/drivers/E220.h` | E220 driver (shared with the sensor node) |
 
 ## MQTT
 
