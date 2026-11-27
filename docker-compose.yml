@@ -1,6 +1,7 @@
 services:
   db:
     image: mysql:8.0
+    restart: unless-stopped   # come back after a crash or a server reboot
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpass}
       MYSQL_DATABASE: carboncrops
@@ -32,6 +33,7 @@ services:
 
   mosquitto:
     image: eclipse-mosquitto:2
+    restart: unless-stopped   # come back after a crash or a server reboot
     ports:
       - "1883:1883"
     volumes:
@@ -41,6 +43,7 @@ services:
 
   api:
     build: ./services/api
+    restart: unless-stopped   # come back after a crash or a server reboot
     environment:
       # datetime.now() / date.today() must be Thai local time, same as the stored data
       TZ: Asia/Bangkok

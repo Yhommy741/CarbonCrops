@@ -27,15 +27,15 @@ In AWD, farmers let the field dry out between irrigations instead of keeping it 
  Rice field                         Gateway                         Server (your PC or a VPS, in Docker)
 ┌──────────────┐   LoRa 922 MHz   ┌──────────────┐  WiFi / MQTT   ┌───────────┐   ┌─────────────┐   ┌───────┐
 │ Sensor node  │ ───────────────▶ │ ESP32 + E220 │ ─────────────▶ │ Mosquitto │──▶│ mqtt-bridge │──▶│ MySQL │
-│ ESP32 + E220 │  10 readings     │              │  JSON message  │  :1883    │   │             │   │       │
-│ + ultrasonic │  per packet      └──────────────┘                └───────────┘   └─────────────┘   └───┬───┘
+│ ESP32 + E220 │  6 readings      │              │  JSON message  │  :1883    │   │             │   │       │
+│ + ultrasonic │  per packet/hour └──────────────┘                └───────────┘   └─────────────┘   └───┬───┘
 └──────────────┘                                                                                      │
                                                     Browser (phone/PC) ◀── Web app (React) ◀── API (FastAPI)
 ```
 
 | Part | Where | What it does |
 |---|---|---|
-| Sensor node | `firmware/CarbonCrop Sensor Node` | Measures the water level every 10 s with an ultrasonic sensor and sends 10 readings per LoRa packet (one packet every ~100 s) |
+| Sensor node | `firmware/CarbonCrop Sensor Node` | Wakes every 10 min to measure the water level with an ultrasonic sensor, sends the 6 readings in one LoRa packet every hour, and deep-sleeps in between |
 | Gateway | `firmware/CarbonCrop Gateway` | Receives LoRa packets and publishes each one to Mosquitto over WiFi |
 | Mosquitto | `services/mosquitto` | MQTT broker: the gateway sends its data here |
 | mqtt-bridge | `services/api/app/mqtt_bridge.py` | Reads messages from Mosquitto and saves them in `sensor_readings` |
@@ -305,7 +305,7 @@ pytest                          # GHG calculation tests
 
 ### 6.1 The path of one reading
 
-1. The **sensor node** takes 10 water-level readings and sends them in one LoRa packet (binary, CRC-checked, format in `shared/protocol/CarbonCropPacket.h`).
+1. The **sensor node** takes one water-level reading every 10 minutes and sends the last 6 in one LoRa packet every hour (binary, CRC-checked, format in `shared/protocol/CarbonCropPacket.h`).
 2. The **gateway** receives the packet, checks the CRC and publishes it as JSON to Mosquitto.
 3. The **mqtt-bridge** converts it and saves each reading in `sensor_readings`.
 4. The **web app** shows it on the paddy's water chart and uses it for AWD phase detection and the carbon calculation.
@@ -358,8 +358,8 @@ docker compose logs -f mqtt-bridge
 | Log line | Meaning |
 |---|---|
 | `connected to mosquitto:1883, subscribing to ...` | The bridge is running |
-| `gw=GW-01 node=1 seq=5: 10/10 new reading(s) saved` | Working |
-| `... 0/10 new reading(s) saved` | Already stored (duplicate), e.g. the gateway re-sent a packet, or the node restarted with the same build-time clock |
+| `gw=GW-01 node=1 seq=5: 6/6 new reading(s) saved` | Working |
+| `... 0/6 new reading(s) saved` | Already stored (duplicate), e.g. the gateway re-sent a packet, or the node restarted with the same build-time clock |
 | `NODE-0001 is not registered in devices or not linked to a paddy` | Data arrives; add a paddy with that sensor (6.2) |
 | `bad message on ...` | The payload isn't valid JSON in the format above |
 
@@ -410,48 +410,57 @@ Both projects use the shared files in `shared/protocol/` (packet format, radio c
 | M0 | GPIO32 |
 | M1 | GPIO33 |
 | AUX | GPIO34 |
-| VCC | 3V3 |
+| VCC | Gateway: 3V3. Sensor node: 3V3 through a MOSFET switched by **GPIO14** |
 
 Radio: **922.125 MHz** (channel 72), inside Thailand's 920–925 MHz LoRa band. Both firmwares set the channel on the E220 at start-up. See `shared/protocol/LoRaConfig.h`.
 
-Sensor node only: ultrasonic **TRIG GPIO25, ECHO GPIO26, power GPIO27**, battery sense **GPIO35** (100k/100k divider). Pin assignments are in each project's `include/PinConfig.h`.
+Sensor node only:
+
+| Part | ESP32 pin |
+|---|---|
+| Ultrasonic TRIG / ECHO / power | GPIO25 / GPIO26 / GPIO27 (VCC straight from the GPIO) |
+| GPS TX → / RX ← (Serial1) | GPIO18 / GPIO19 |
+| GPS power MOSFET | GPIO13 |
+| E220 power MOSFET | GPIO14 |
+| Battery sense (100k/100k divider) | GPIO35 |
+
+The MOSFET gates are **HIGH = module on**. They are held LOW during deep sleep, so the GPS and E220 draw nothing between sends. Gateway only: INA219 current sensor (lab power test) on **SDA GPIO21, SCL GPIO22**. Pin assignments are in each project's `include/PinConfig.h`.
 
 ### 7.3 Sensor node settings
 
-The node runs a state machine (`src/App.cpp`); its timing is set in `include/AppConfig.h`:
+The node runs a state machine (`src/App.cpp`) and **deep-sleeps between samples**. Each wake takes one sample; the wake that fills the packet also reads GPS and sends it. Timing is set in `include/AppConfig.h`:
 
 ```
-read GPS                                   (once per packet)
-repeat APP_SAMPLES_PER_PACKET (10) times:
-    read RTC         -> time of this sample
-    read ultrasonic  -> one reading, APP_ULTRASONIC_READS (10) times, 500 ms apart
-    filter           -> keep only valid readings, mean -> water level
-    wait until APP_SAMPLE_INTERVAL_MS (10 s) after this sample started
-send the packet over LoRa
-wait APP_PACKET_PAUSE_MS (0), then start again
+wake 1-5  (every 10 min)   read RTC -> ultrasonic on, wait 500 ms
+                           -> APP_ULTRASONIC_READS (10) readings, 500 ms apart
+                           -> filter (mean) -> water level -> deep sleep
+wake 6                     GPS + E220 on -> wait for a GPS fix (max APP_GPS_TIMEOUT_MS)
+                           -> same sample as above -> send the 6 samples over LoRa
+                           -> deep sleep
 ```
 
-Samples run on a fixed schedule, so the time a measurement or a send takes doesn't make the interval drift. GPS (`src/Gps.cpp`) and RTC (`src/Rtc.cpp`) are placeholders for now: fixed coordinates and the build-time clock.
+The packet being filled is kept in RTC memory, which survives deep sleep but not a power cut or reset. The awake time is subtracted from each sleep, so wakes stay 10 min apart. The LED blinks once on a reading wake and twice on a sending wake.
 
+Code layout: `App.cpp` holds only the state machine; the hardware is in `Power.cpp` (MOSFETs, deep sleep), `Radio.cpp` (E220), `Gps.cpp`, `Rtc.cpp`, `Ultrasonic.cpp` and `Filter.cpp`. GPS and RTC are placeholders for now: fixed coordinates and the build-time clock.
 
 | File | Setting | Default | Notes |
 |---|---|---|---|
 | `include/NodeConfig.h` | `NODE_ID` | `1` | Unique per node. Becomes `NODE-0001` in the database |
 | | `NODE_LATITUDE` / `NODE_LONGITUDE` | Bangkok | Placeholder until a GPS module is added |
 | | `USE_DUMMY_DATA` | `true` | Sends fixed water levels (real timestamps) to test the LoRa link. Set `false` for real ultrasonic readings |
-| `include/AppConfig.h` | `APP_SAMPLES_PER_PACKET` | `10` | Samples per LoRa packet (1–10) |
-| | `APP_SAMPLE_INTERVAL_MS` | `10000` | Time between samples. Must be longer than the readings of one sample (~5.5 s; checked at build time) |
+| `include/AppConfig.h` | `APP_SAMPLES_PER_PACKET` | `6` | Samples per LoRa packet (1–10); the last one also reads GPS and sends |
+| | `APP_SAMPLE_INTERVAL_MS` | `600000` (10 min) | Time between wakes. For a bench test, use the commented-out 10 s line. Must be longer than one sample (~5.5 s) + `APP_MIN_SLEEP_MS`; checked at build time |
+| | `APP_MIN_SLEEP_MS` | `1000` | Shortest sleep, if a wake ran longer than the interval |
+| | `APP_GPS_TIMEOUT_MS` | `7000` | Longest wait for a GPS fix on the sending wake. Raise to ~60000 with a real GPS module |
 | | `APP_ULTRASONIC_READS` | `10` | Single ultrasonic readings per sample, then filtered into one water level |
 | | `APP_ULTRASONIC_READ_INTERVAL_MS` | `500` | Time between those readings |
-| | `APP_PACKET_PAUSE_MS` | `0` | Extra wait after sending, before the next packet |
-| | `APP_STARTUP_DELAY_MS` | `2000` | Wait after boot before the first sample |
 | | `APP_ULTRASONIC_FILTER` | `Mean` | Filter type (`Filter.h`: Mean / Median / TrimmedMean); `APP_ULTRASONIC_MIN_VALID` (5) valid readings needed |
 | `include/PipeConfig.h` | `PIPE_SENSOR_TO_GROUND_CM` | `50` | Distance from the sensor face down to the soil surface. Measure it after installing the pipe. Water level = this − measured distance |
 | `include/HCSR04.h` | `HCSR04_CAL_SCALE` / `HCSR04_CAL_OFFSET_CM` | `1` / `0` | Calibration of the filtered distance (two known distances with a ruler) |
 | | `HCSR04_TEMPERATURE_C`, range, warm-up | `30 °C`, 20–450 cm, 500 ms | Sensor constants |
 | `include/Battery.h` | divider, `BATTERY_CAL_*`, OCV table | 1S LiFePO4 | Battery voltage → SoC (5 % lookup table + interpolation). Low 3.20 V, critical 3.00 V, empty 2.80 V |
 
-> **Clock:** there is no RTC module yet, so the node's clock starts from the firmware **build time** and restarts at every reset. Timestamps are only right if you upload right after building, and they go wrong after a power cycle.
+> **Clock:** there is no RTC module yet, so the node's clock starts from the firmware **build time**. It keeps running through deep sleep, but restarts from the build time after a reset or power cut. Timestamps are only right if you upload right after building. The ESP32's sleep clock can also drift by a few percent, so expect the time to wander until a DS3231 RTC is added.
 
 ### 7.4 Gateway settings
 
@@ -473,9 +482,11 @@ Samples run on a fixed schedule, so the time a measurement or a send takes doesn
 
 `GATEWAY_ID` (default `GW-01`) is in `include/NetConfig.h`; give each gateway its own. `LOCAL_UTC_OFFSET_S` there is the farm's time zone (default UTC+7); keep it the same as the sensor node's.
 
-**What the gateway does:** it keeps receiving LoRa packets at all times. If WiFi or MQTT is down, it holds up to **32 packets** in memory (about 50 minutes at the default one packet every ~100 s) and sends them when the connection is back. Packets in memory are lost if the gateway loses power.
+**What the gateway does:** it keeps receiving LoRa packets at all times. If WiFi or MQTT is down, it holds up to **32 packets** in memory (about 32 hours per sensor node at one packet an hour) and sends them when the connection is back. Packets in memory are lost if the gateway loses power.
 
-**After uploading** you can unplug the gateway from the computer and power it from any USB charger or power bank. The machine running Docker must be on.
+**After uploading** you can unplug the gateway from the computer and power it from any USB charger or power bank. The machine running Docker (your PC or the VPS) must be on.
+
+**Power logger (lab test):** to measure the sensor node's current, connect an INA219 to the gateway (SDA GPIO21, SCL GPIO22) with the node's supply running through it. Then upload the `powerlog` build: `pio run -e powerlog -t upload`. The gateway then also prints a CSV line `Time_s,Voltage_V,Current_mA,Power_mW` every 100 ms. The normal build (`pio run -t upload`) leaves the logger out.
 
 Serial monitor output when everything works:
 
@@ -496,59 +507,134 @@ Serial monitor output when everything works:
 
 ## 8. Deploying to a VPS
 
-On a VPS the server parts run all the time, the gateway connects over the internet (any WiFi or a 4G hotspot in the field), and nobody's PC needs to be on.
+On a VPS the server parts run all the time, the gateway connects over the internet (any WiFi or a 4G hotspot in the field), and nobody's PC needs to be on. Only the server runs on the VPS; the firmware is still built and uploaded from a PC (section 7).
 
 ```
 Gateway ──internet──▶ VPS :1883 (Mosquitto) → mqtt-bridge → MySQL
 Browser ──HTTPS────▶ VPS :443 (Caddy) → web app files + /api → API
 ```
 
-> ⚠️ **Read 8.3 before you start.** The default settings are for a laptop. On a public server, `DEV_LOGIN=true` lets **anyone sign in as any user**, and anonymous MQTT lets anyone send fake sensor data.
+> ⚠️ **Do the steps in order.** The default settings are for a laptop. On a public server, `DEV_LOGIN=true` lets **anyone sign in as any user**, and anonymous MQTT lets anyone send fake sensor data. 8.4 turns on the MQTT login before the broker starts, and 8.6 puts the whole site behind a password: the API is only reachable through Caddy.
 
 ### 8.1 Requirements
 
-- A VPS with **Ubuntu 22.04 or 24.04**, at least **1 GB RAM** (2 GB recommended), and SSH access
-- Recommended: a **domain name** pointing to the VPS (an `A` record). Caddy then gets an HTTPS certificate automatically. Without a domain you can use plain HTTP on the IP for testing.
+- A VPS with **Ubuntu 22.04 or 24.04**, at least **1 GB RAM** (2 GB recommended), and SSH access. A Singapore region is closest to Thailand.
+- Recommended: a **domain name** pointing to the VPS (an `A` record with the VPS's IP). Caddy then gets an HTTPS certificate automatically. Without a domain you can use plain HTTP on the IP for testing.
+- If the GitHub repository is **private**, the VPS needs access to clone it: a [personal access token](https://github.com/settings/tokens) (used as the password) or a deploy key.
 
-### 8.2 Install and start
+### 8.2 Prepare the server
+
+Log in with `ssh <user>@<vps-ip>`, then:
 
 ```bash
-# 1. Docker
+# Updates
+sudo apt update && sudo apt upgrade -y
+
+# Docker
 curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER        # then log out and back in
+sudo usermod -aG docker $USER        # then log out and back in (exit, ssh again)
 
-# 2. The code
-git clone https://github.com/Yhommy741/CarbonCrops.git
-cd CarbonCrops
-
-# 3. Settings: copy, then change every password and key (see 8.3)
-cp .env.example .env
-nano .env
-
-# 4. Start the backend (MySQL, Mosquitto, API, mqtt-bridge)
-docker compose up -d --build
-docker compose ps
+# Firewall: only SSH, web and MQTT
+sudo ufw allow 22/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 1883/tcp
+sudo ufw enable
 ```
 
-**Web app.** Build it once (and after every update), then serve it with Caddy:
+MySQL (3306) and the API (8000) are bound to `127.0.0.1` in `docker-compose.yml`, so they are not reachable from the internet. This matters because Docker-published ports bypass `ufw`.
+
+**1 GB RAM only:** add 2 GB of swap so MySQL and the web app build don't run out of memory:
 
 ```bash
-# Node.js LTS
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+### 8.3 Code and settings
+
+```bash
+git clone https://github.com/Yhommy741/CarbonCrops.git
+cd CarbonCrops
+cp .env.example .env
+openssl rand -hex 32        # run once per value below, paste each result into .env
+nano .env
+```
+
+Set in `.env`:
+
+| Setting | Value |
+|---|---|
+| `DB_ROOT_PASSWORD`, `DB_PASSWORD` | New random values. **Set them before the first start**: MySQL only reads them when it creates the database |
+| `JWT_SECRET`, `INGEST_API_KEY` | New random values |
+| `DEV_LOGIN` | Leave `true` until LINE Login is built (the sign-in page lists every user), but then the whole site **must** be behind the Caddy password in 8.6 |
+| `MQTT_USER`, `MQTT_PASSWORD` | `carboncrops` and a password you choose (used in 8.4 and 8.7) |
+
+Never commit `.env`. It is gitignored.
+
+### 8.4 MQTT login
+
+Create Mosquitto's password file, using the same user and password as in `.env`:
+
+```bash
+docker run --rm -v "$PWD/services/mosquitto/config:/c" eclipse-mosquitto:2 \
+    mosquitto_passwd -c -b /c/passwd carboncrops '<mqtt-password>'
+sudo chown 1883:1883 services/mosquitto/config/passwd   # the user Mosquitto runs as
+sudo chmod 0700 services/mosquitto/config/passwd
+```
+
+Then in `services/mosquitto/config/mosquitto.conf`, replace `allow_anonymous true` with:
+
+```
+allow_anonymous false
+password_file /mosquitto/config/passwd
+```
+
+Don't commit this change or `passwd`: on a laptop the broker stays anonymous. MQTT on port 1883 isn't encrypted: fine for a test, but plan for TLS (port 8883) before real farm data goes through it.
+
+### 8.5 Start the backend
+
+```bash
+docker compose up -d --build
+docker compose ps                    # db, mosquitto, api, mqtt-bridge: all "Up" (db "healthy")
+docker compose logs mqtt-bridge      # should say: connected to mosquitto:1883, subscribing to ...
+```
+
+The first start takes ~30 seconds while MySQL loads the schema and the two accounts (5.2). All four services have `restart: unless-stopped`, so they come back by themselves after a crash or a VPS reboot.
+
+### 8.6 Web app and HTTPS (Caddy)
+
+Build the web app (again after every update):
+
+```bash
 curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
 sudo apt install -y nodejs
 cd apps/web && npm ci && npm run build && cd ../..    # output: apps/web/dist
-
-# Caddy (web server with automatic HTTPS)
-sudo apt install -y caddy
 ```
 
-Write `/etc/caddy/Caddyfile` (replace the domain and the path to the project):
+Install Caddy from its official repository (Ubuntu 22.04 doesn't include it):
+
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+```
+
+Create the site password (needed while `DEV_LOGIN=true`):
+
+```bash
+caddy hash-password          # type the team password, copy the hash it prints
+```
+
+Write `/etc/caddy/Caddyfile` (`sudo nano /etc/caddy/Caddyfile`), with your domain, the hash, and the path to the project (`pwd` inside `CarbonCrops` shows it):
 
 ```caddy
 carboncrops.example.com {
-    # Temporary site-wide password while DEV_LOGIN is on (see 8.3)
+    # Site-wide password while DEV_LOGIN is on
     basic_auth {
-        team <hash from: caddy hash-password>
+        team <hash from caddy hash-password>
     }
 
     handle /api/* {
@@ -571,73 +657,54 @@ Without a domain, use `:80 {` as the first line instead (HTTP only). Then:
 sudo systemctl reload caddy
 ```
 
-Caddy needs read access to `apps/web/dist`; if you get a 403, `chmod o+x` the folders on the path to it (e.g. `/home/ubuntu`).
+Open `https://<your-domain>` (or `http://<vps-ip>`), enter `team` and the password, then sign in as **FarmerA** or **VBB**.
 
-**Firewall:** allow only SSH, web and MQTT:
+- **403 error:** Caddy needs read access to `apps/web/dist`. Run `chmod o+x` on the folders on the path to it (e.g. `chmod o+x /home/ubuntu`).
+- **HTTPS fails:** check that the domain's `A` record points to the VPS and ports 80/443 are open, then read `sudo journalctl -u caddy -n 50`.
+
+### 8.7 Connect the gateway
+
+On your PC, in the gateway's `include/Secrets.h` (7.4):
+
+```c
+#define MQTT_HOST     "carboncrops.example.com"   // or the VPS's public IP
+#define MQTT_PORT     1883
+#define MQTT_USER     "carboncrops"
+#define MQTT_PASSWORD "<mqtt-password>"           // the one from 8.4
+```
+
+Upload the gateway firmware again. The gateway can now be on any WiFi with internet access. Its serial monitor should show `[MQTT] connecting to ... ok`; `failed (state 5)` means the MQTT user or password is wrong.
+
+### 8.8 Check the whole chain
+
+1. **Server:** `docker compose ps` shows all four services up.
+2. **Gateway online:** on the VPS, `docker compose exec mosquitto mosquitto_sub -u carboncrops -P '<mqtt-password>' -v -t 'carboncrops/#'` shows `carboncrops/gw/GW-01/status online` once the gateway connects.
+3. **Sensor node registered:** in the app, sign in as FarmerA and add a paddy with the sensor ID (`NODE-0001`; see 6.2).
+4. **Readings saved:** `docker compose logs -f mqtt-bridge` shows `node=1 seq=...: 6/6 new reading(s) saved`. The node sends one packet per hour, so the first one can take up to an hour after it starts.
+5. **Web app:** the paddy's water chart shows the readings.
+
+With the MQTT login on, the test commands in 6.3 (`mosquitto_pub` / `mosquitto_sub`) also need `-u carboncrops -P '<mqtt-password>'`.
+
+### 8.9 Updating and backups
 
 ```bash
-sudo ufw allow 22/tcp
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow 1883/tcp
-sudo ufw enable
-```
-
-MySQL (3306) and the API (8000) are bound to `127.0.0.1` in `docker-compose.yml`, so they are not reachable from the internet. This matters because Docker-published ports bypass `ufw`.
-
-### 8.3 Security checklist (do this before anyone else uses it)
-
-| Item | What to do |
-|---|---|
-| **Passwords and keys** | In `.env`, set new random values for `DB_ROOT_PASSWORD`, `DB_PASSWORD`, `JWT_SECRET` and `INGEST_API_KEY` (e.g. `openssl rand -hex 32`). The DB passwords only take effect when the database is first created |
-| **Development login** | `DEV_LOGIN=true` shows every account on the sign-in page with no password. Until LINE Login is built, keep the whole site behind Caddy's `basic_auth` (above): create the hash with `caddy hash-password` and give the password only to the team |
-| **MQTT login** | See below |
-| **Updates** | `sudo apt update && sudo apt upgrade` regularly |
-
-**MQTT username and password:**
-
-```bash
-# 1. Create the password file (user "carboncrops"; you choose the password)
-docker run --rm -v "$PWD/services/mosquitto/config:/c" eclipse-mosquitto:2 \
-    mosquitto_passwd -c -b /c/passwd carboncrops '<mqtt-password>'
-sudo chown 1883:1883 services/mosquitto/config/passwd   # the user Mosquitto runs as
-sudo chmod 0700 services/mosquitto/config/passwd
-```
-
-2. In `services/mosquitto/config/mosquitto.conf`, replace `allow_anonymous true` with:
-
-```
-allow_anonymous false
-password_file /mosquitto/config/passwd
-```
-
-3. In `.env`, set the bridge's login:
-
-```
-MQTT_USER=carboncrops
-MQTT_PASSWORD=<mqtt-password>
-```
-
-4. Restart: `docker compose up -d --force-recreate mosquitto mqtt-bridge`
-5. In the gateway's `Secrets.h`, set `MQTT_HOST` to the VPS's IP or domain and fill in `MQTT_USER` / `MQTT_PASSWORD`, then upload the firmware again.
-
-Don't commit `passwd`, `.env` or `Secrets.h`. MQTT on port 1883 isn't encrypted: fine for a test, but plan for TLS (port 8883) before real farm data goes through it.
-
-### 8.4 Updating and backups
-
-```bash
+cd ~/CarbonCrops
 git pull
 docker compose up -d --build                           # backend
 cd apps/web && npm ci && npm run build && cd ../..    # web app (Caddy serves the new files immediately)
 ```
 
-Back up the database:
+A new migration file in `services/database/migrations/` isn't applied to an existing database automatically: run it once as in 5.3.
+
+> The `mysql` commands elsewhere in this README use the local default passwords (`-pcarboncrops`, `-prootpass`). On the VPS, use your `DB_PASSWORD` / `DB_ROOT_PASSWORD` from `.env` instead.
+
+Back up the database (e.g. daily, and before every update):
 
 ```bash
 docker compose exec db sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" carboncrops' > backup-$(date +%F).sql
 ```
 
-Uploaded photos are in `services/api/uploads/`; back them up too.
+Uploaded photos are in `services/api/uploads/`; back them up too. Copy both off the VPS (e.g. with `scp` to your PC): a backup kept only on the server is lost with it.
 
 ## 9. How the app works
 
